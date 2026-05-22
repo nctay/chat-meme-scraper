@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StreamerStatus {
+  unknown
+  online
+  offline
+}
+
+enum StreamSessionStatus {
+  live
+  ended
+}
+
+enum ChatPostStatus {
+  stored
+  pending
+  failed
+  blocked
+  skipped
+}
+
+enum AssetStatus {
+  pending
+  stored
+  failed
+  skipped
+  deleted
+}
+
+enum AssetVisibility {
+  public
+  hidden
+}
+
+enum MediaType {
+  image
+  video
+  other
+}
+
+enum DownloadJobStatus {
+  pending
+  running
+  done
+  failed
+  ignored
+  blocked
+}
+
+model Streamer {
+  id            String          @id @default(cuid())
+  twitchUserId  String          @unique
+  login         String          @unique
+  displayName   String
+  enabled       Boolean         @default(true)
+  lastStatus    StreamerStatus  @default(unknown)
+  lastCheckedAt DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  sessions      StreamSession[]
+
+  @@map("streamers")
+}
+
+model StreamSession {
+  id             String              @id @default(cuid())
+  streamerId     String
+  twitchStreamId String?
+  title          String?
+  startedAt      DateTime
+  endedAt        DateTime?
+  status         StreamSessionStatus @default(live)
+  streamer       Streamer            @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+  posts          ChatPost[]
+
+  @@index([streamerId, startedAt])
+  @@index([status])
+  @@map("stream_sessions")
+}
+
+model ChatPost {
+  id              String         @id @default(cuid())
+  streamSessionId String
+  twitchMessageId String?        @unique
+  authorTwitchId  String?
+  authorName      String
+  messageText     String
+  originalUrl     String
+  normalizedUrl   String
+  postedAt        DateTime
+  assetId         String?
+  status          ChatPostStatus @default(pending)
+  streamSession   StreamSession  @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
+  asset           Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  downloadJobs    DownloadJob[]
+
+  @@index([streamSessionId, postedAt])
+  @@index([assetId])
+  @@index([normalizedUrl])
+  @@index([status])
+  @@map("chat_posts")
+}
+
+model Asset {
+  id           String           @id @default(cuid())
+  originalUrl  String
+  normalizedUrl String          @unique
+  sha256       String?          @unique
+  s3Key        String?
+  publicUrl    String?
+  mimeType     String?
+  byteSize     BigInt?
+  mediaType    MediaType        @default(other)
+  status       AssetStatus      @default(pending)
+  visibility   AssetVisibility  @default(public)
+  deletedAt    DateTime?
+  deletedBy    String?
+  deleteReason String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  posts        ChatPost[]
+  jobs         DownloadJob[]
+  blockedMedia BlockedMedia[]
+
+  @@index([status])
+  @@index([visibility])
+  @@index([mediaType])
+  @@map("assets")
+}
+
+model DownloadJob {
+  id           String            @id @default(cuid())
+  assetId      String?
+  chatPostId   String
+  url          String
+  status       DownloadJobStatus @default(pending)
+  attempts     Int               @default(0)
+  nextRetryAt  DateTime?
+  lastError    String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  asset        Asset?            @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  chatPost     ChatPost          @relation(fields: [chatPostId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextRetryAt])
+  @@index([assetId])
+  @@index([chatPostId])
+  @@map("download_jobs")
+}
+
+model BlockedMedia {
+  id            String   @id @default(cuid())
+  normalizedUrl String?  @unique
+  sha256        String?  @unique
+  reason        String
+  sourceAssetId String?
+  createdAt     DateTime @default(now())
+  sourceAsset   Asset?   @relation(fields: [sourceAssetId], references: [id], onDelete: SetNull)
+
+  @@index([normalizedUrl])
+  @@index([sha256])
+  @@map("blocked_media")
+}
+
+model AdminAuditLog {
+  id            String   @id @default(cuid())
+  adminUsername String
+  action        String
+  entityType    String
+  entityId      String
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("admin_audit_log")
+}
