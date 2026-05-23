@@ -7,6 +7,7 @@ export const env = z
     TELEGRAM_STORAGE_CHAT_ID: z.string().min(1),
     TELEGRAM_ALLOWED_USER_IDS: z.string().min(1),
     TELEGRAM_PUBLIC_BOT_TOKEN: z.string().optional(),
+    TELEGRAM_PRIVATE_STREAMER_LOGINS: z.string().default(""),
   })
   .parse(process.env);
 
@@ -14,4 +15,10 @@ export const allowedUserIds = new Set(
   env.TELEGRAM_ALLOWED_USER_IDS.split(",")
     .map((id) => Number(id.trim()))
     .filter(Number.isSafeInteger),
+);
+
+export const privateStreamerLogins = new Set(
+  env.TELEGRAM_PRIVATE_STREAMER_LOGINS.split(",")
+    .map((login) => login.trim().toLowerCase())
+    .filter(Boolean),
 );

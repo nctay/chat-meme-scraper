@@ -1,13 +1,12 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
 import type { Prisma } from "@prisma/client";
-import { allowedUserIds, env } from "./env.js";
+import { allowedUserIds, env, privateStreamerLogins } from "./env.js";
 import { prisma } from "./prisma.js";
 import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
 const pageSize = 10;
 const publicPageSize = 50;
-const privatePublicStreamerLogins = new Set(["nctay"]);
 const bots: Bot[] = [];
 const publicChatLimiters = new Map<number | string, SerialRateLimiter>();
 
@@ -468,11 +467,11 @@ function publicStoredPostWhere() {
 
 function publicStreamerAccessWhere(ctx: Context) {
   if (isAllowedAdmin(ctx)) return {};
-  return { login: { notIn: [...privatePublicStreamerLogins] } };
+  return { login: { notIn: [...privateStreamerLogins] } };
 }
 
 function canAccessPublicStreamer(ctx: Context, login: string): boolean {
-  return isAllowedAdmin(ctx) || !privatePublicStreamerLogins.has(login.toLowerCase());
+  return isAllowedAdmin(ctx) || !privateStreamerLogins.has(login.toLowerCase());
 }
 
 function isAllowedAdmin(ctx: Context): boolean {
