@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Bot, InputFile } from "grammy";
+import type { Message } from "grammy/types";
 import { env } from "../env.js";
 import type { StoreMediaMetadata, StoredMedia } from "./storage.js";
+import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
 let bot: Bot | null = null;
+const storageSendLimiter = new SerialRateLimiter(1100);
 
 function telegramBot(): Bot {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -24,10 +27,12 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   ].join("\n");
 
   const input = new InputFile(fs.createReadStream(filePath), fileName(filePath, mimeType, mediaType));
-  const message =
-    mediaType === "image"
-      ? await telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID, input, { caption })
-      : await telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID, input, { caption, supports_streaming: true });
+  const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage>(async () => {
+    if (mediaType === "image") {
+      return telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
+    }
+    return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, supports_streaming: true });
+  });
   const file = "photo" in message ? message.photo.at(-1) : message.video;
   if (!file) throw new Error("Telegram did not return stored file metadata");
 
@@ -42,7 +47,7 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
 
 export async function deleteTelegramMedia(asset: { telegramChatId: string | null; telegramMessageId: number | null }): Promise<void> {
   if (!asset.telegramChatId || !asset.telegramMessageId) return;
-  await telegramBot().api.deleteMessage(asset.telegramChatId, asset.telegramMessageId);
+  await withTelegramRetry(() => telegramBot().api.deleteMessage(asset.telegramChatId!, asset.telegramMessageId!));
 }
 
 function fileName(filePath: string, mimeType: string, mediaType: "image" | "video"): string {

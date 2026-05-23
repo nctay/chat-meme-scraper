@@ -3,10 +3,13 @@ import type { Context } from "grammy";
 import type { Prisma } from "@prisma/client";
 import { allowedUserIds, env } from "./env.js";
 import { prisma } from "./prisma.js";
+import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
 const pageSize = 10;
 const publicPageSize = 50;
+const privatePublicStreamerLogins = new Set(["nctay"]);
 const bots: Bot[] = [];
+const publicChatLimiters = new Map<number | string, SerialRateLimiter>();
 
 const adminBot = new Bot(env.TELEGRAM_BOT_TOKEN);
 bots.push(adminBot);
@@ -268,6 +271,7 @@ async function sendPublicStreamers(ctx: Context, offset: number): Promise<void> 
   const streamers = await prisma.streamer.findMany({
     where: {
       enabled: true,
+      ...publicStreamerAccessWhere(ctx),
       sessions: {
         some: {
           posts: {
@@ -298,6 +302,10 @@ async function sendPublicStreamers(ctx: Context, offset: number): Promise<void> 
 async function sendPublicStreams(ctx: Context, streamerId: string, offset: number): Promise<void> {
   const streamer = await prisma.streamer.findUnique({ where: { id: streamerId } });
   if (!streamer) {
+    await ctx.reply("Стример не найден.");
+    return;
+  }
+  if (!canAccessPublicStreamer(ctx, streamer.login)) {
     await ctx.reply("Стример не найден.");
     return;
   }
@@ -345,6 +353,10 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
     await ctx.reply("Стрим не найден.");
     return;
   }
+  if (!canAccessPublicStreamer(ctx, session.streamer.login)) {
+    await ctx.reply("Стрим не найден.");
+    return;
+  }
 
   const posts = await prisma.chatPost.findMany({
     where: {
@@ -367,24 +379,26 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
     .row()
     .text("Показать еще", `pub:stream:${streamId}:${offset + publicPageSize}`);
 
-  await ctx.reply(`${session.streamer.displayName} / ${formatDate(session.startedAt)}`);
+  await withTelegramRetry(() => ctx.reply(`${session.streamer.displayName} / ${formatDate(session.startedAt)}`));
 
   let copied = 0;
   for (const post of posts) {
     const asset = post.asset;
     if (!asset?.telegramChatId || !asset.telegramMessageId) continue;
 
-    await ctx.api.copyMessage(ctx.chat!.id, asset.telegramChatId, asset.telegramMessageId, {
-      caption: publicMediaCaption(post),
-    });
+    await schedulePublicChatMessage(ctx.chat!.id, () =>
+      ctx.api.copyMessage(ctx.chat!.id, asset.telegramChatId!, asset.telegramMessageId!, {
+        caption: publicMediaCaption(post),
+      }),
+    );
     copied += 1;
   }
 
   if (copied === 0) {
-    await ctx.reply("В этой пачке нет доступных Telegram-медиа.");
+    await withTelegramRetry(() => ctx.reply("В этой пачке нет доступных Telegram-медиа."));
   }
 
-  await ctx.reply(`Показано: ${offset + copied}`, { reply_markup: keyboard });
+  await schedulePublicChatMessage(ctx.chat!.id, () => ctx.reply(`Показано: ${offset + copied}`, { reply_markup: keyboard }));
 }
 
 async function sendPosts(ctx: Context, posts: PostWithMedia[]): Promise<void> {
@@ -452,11 +466,34 @@ function publicStoredPostWhere() {
   };
 }
 
+function publicStreamerAccessWhere(ctx: Context) {
+  if (isAllowedAdmin(ctx)) return {};
+  return { login: { notIn: [...privatePublicStreamerLogins] } };
+}
+
+function canAccessPublicStreamer(ctx: Context, login: string): boolean {
+  return isAllowedAdmin(ctx) || !privatePublicStreamerLogins.has(login.toLowerCase());
+}
+
+function isAllowedAdmin(ctx: Context): boolean {
+  const userId = ctx.from?.id;
+  return Boolean(userId && allowedUserIds.has(userId));
+}
+
 function publicMediaCaption(post: PublicPostWithAsset): string {
   const text = stripUrls(post.messageText).replace(/\s+/g, " ").trim();
   const prefix = `[${formatMoscowTime(post.postedAt)}] [${post.authorName}]`;
   if (!text) return prefix;
   return truncate(`${prefix}: ${text}`, 1000);
+}
+
+function schedulePublicChatMessage<T>(chatId: number | string, task: () => Promise<T>): Promise<T> {
+  let limiter = publicChatLimiters.get(chatId);
+  if (!limiter) {
+    limiter = new SerialRateLimiter(1100);
+    publicChatLimiters.set(chatId, limiter);
+  }
+  return limiter.schedule(task);
 }
 
 function stripUrls(text: string): string {
