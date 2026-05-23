@@ -172,19 +172,23 @@ if (publicBot) {
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
-await adminBot.api.setMyCommands([
-  { command: "start", description: "Меню" },
-  { command: "live", description: "Live-стримы" },
-  { command: "streams", description: "Последние стримы" },
-  { command: "latest", description: "Последние 10 медиа" },
-  { command: "stream", description: "Медиа стрима по id" },
-]);
+await withTelegramRetry(() =>
+  adminBot.api.setMyCommands([
+    { command: "start", description: "Меню" },
+    { command: "live", description: "Live-стримы" },
+    { command: "streams", description: "Последние стримы" },
+    { command: "latest", description: "Последние 10 медиа" },
+    { command: "stream", description: "Медиа стрима по id" },
+  ]),
+);
 
 if (publicBot) {
-  await publicBot.api.setMyCommands([
-    { command: "start", description: "Выбрать стримера" },
-    { command: "streamers", description: "Список стримеров" },
-  ]);
+  await withTelegramRetry(() =>
+    publicBot.api.setMyCommands([
+      { command: "start", description: "Выбрать стримера" },
+      { command: "streamers", description: "Список стримеров" },
+    ]),
+  );
 }
 
 console.log(`[bot] starting admin${publicBot ? " and public" : ""}`);

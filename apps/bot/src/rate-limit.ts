@@ -26,8 +26,14 @@ export async function withTelegramRetry<T>(task: () => Promise<T>): Promise<T> {
       return await task();
     } catch (error) {
       const retryAfter = telegramRetryAfterSeconds(error);
-      if (!retryAfter || attempt >= 3) throw error;
-      await sleep((retryAfter + 1) * 1000);
+      if (retryAfter) {
+        if (attempt >= 3) throw error;
+        await sleep((retryAfter + 1) * 1000);
+        continue;
+      }
+
+      if (!isTransientNetworkError(error) || attempt >= 5) throw error;
+      await sleep(Math.min(30_000, 1000 * 2 ** attempt));
     }
   }
 }
@@ -42,4 +48,10 @@ function telegramRetryAfterSeconds(error: unknown): number | null {
     return maybe.parameters.retry_after;
   }
   return null;
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const maybe = error as { error?: { code?: string }; code?: string };
+  const code = maybe.error?.code ?? maybe.code;
+  return code === "ETIMEDOUT" || code === "ECONNRESET" || code === "EAI_AGAIN" || code === "ENOTFOUND";
 }
