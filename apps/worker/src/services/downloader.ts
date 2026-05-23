@@ -3,12 +3,14 @@ import dns from "node:dns/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { assertSafeResolvedAddress, assertSafeUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
+import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isPlatformMediaUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
+import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-download.js";
 
 type DownloadResult = {
   filePath: string;
@@ -158,6 +160,13 @@ async function claimDownloadJob() {
 }
 
 async function downloadMedia(rawUrl: string): Promise<DownloadResult> {
+  if (isPlatformMediaUrl(rawUrl)) {
+    return downloadPlatformVideo(rawUrl);
+  }
+  return downloadDirectMedia(rawUrl);
+}
+
+async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
   let url = toUrl(rawUrl);
   if (!url) throw new Error("Invalid media URL");
 
@@ -221,6 +230,152 @@ async function downloadMedia(rawUrl: string): Promise<DownloadResult> {
   }
 
   throw new Error("Too many redirects");
+}
+
+async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
+  if (!env.ENABLE_PLATFORM_DOWNLOADS) throw new Error("Platform downloads are disabled");
+
+  const url = toUrl(rawUrl);
+  if (!url) throw new Error("Invalid platform URL");
+  assertSafeUrl(url);
+
+  const limit = env.MAX_VIDEO_BYTES;
+  await assertPlatformVideoFits(url.toString(), limit);
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-platform-"));
+  const outputTemplate = path.join(tempDir, "%(id)s.%(ext)s");
+
+  try {
+    await runYtDlp([
+      "--no-playlist",
+      "--no-progress",
+      "--restrict-filenames",
+      "--max-filesize",
+      String(limit),
+      "--match-filter",
+      `duration <= ${env.MAX_PLATFORM_VIDEO_SECONDS}`,
+      "--format",
+      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best[ext=mp4]/best",
+      "--merge-output-format",
+      "mp4",
+      "--output",
+      outputTemplate,
+      url.toString(),
+    ]);
+
+    const downloadedPath = await findDownloadedPlatformFile(tempDir);
+    const ext = getExtension(downloadedPath) ?? "mp4";
+    const finalPath = path.join(os.tmpdir(), `archive-platform-${crypto.randomUUID()}.${ext}`);
+    await fs.promises.rename(downloadedPath, finalPath);
+
+    const result = await inspectDownloadedFile(finalPath, "video");
+    if (result.byteSize > limit) {
+      await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
+      throw new Error(`Platform video exceeded byte limit ${limit}`);
+    }
+
+    return {
+      ...result,
+      filePath: finalPath,
+      mediaType: "video",
+      finalUrl: url.toString(),
+    };
+  } finally {
+    await fs.promises.rm(tempDir, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
+async function assertPlatformVideoFits(url: string, limit: number): Promise<void> {
+  const metadata = JSON.parse(
+    await runYtDlp([
+      "--dump-json",
+      "--skip-download",
+      "--no-playlist",
+      "--no-warnings",
+      "--no-progress",
+      url,
+    ]),
+  ) as PlatformMetadata;
+
+  assertPlatformMetadataFits(metadata, limit, env.MAX_PLATFORM_VIDEO_SECONDS);
+}
+
+async function runYtDlp(args: string[]): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.PLATFORM_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const child = spawn("yt-dlp", args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        signal: controller.signal,
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout.push(chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr.push(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code, signal) => {
+        const message = Buffer.concat(stderr).toString("utf8").trim();
+        if (code === 0) {
+          resolve(Buffer.concat(stdout).toString("utf8"));
+          return;
+        }
+        reject(new Error(`yt-dlp failed${signal ? ` (${signal})` : ""}: ${message || `exit code ${code}`}`));
+      });
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`yt-dlp timed out after ${env.PLATFORM_DOWNLOAD_TIMEOUT_MS}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findDownloadedPlatformFile(tempDir: string): Promise<string> {
+  const entries = await fs.promises.readdir(tempDir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && !entry.name.endsWith(".part") && !entry.name.endsWith(".ytdl"))
+      .map(async (entry) => {
+        const filePath = path.join(tempDir, entry.name);
+        const stat = await fs.promises.stat(filePath);
+        return { filePath, size: stat.size };
+      }),
+  );
+  const largest = files.sort((a, b) => b.size - a.size)[0];
+  if (!largest) throw new Error("yt-dlp did not produce a media file");
+  return largest.filePath;
+}
+
+async function inspectDownloadedFile(filePath: string, expectedMediaType: "image" | "video"): Promise<Omit<DownloadResult, "filePath" | "mediaType" | "finalUrl">> {
+  const stat = await fs.promises.stat(filePath);
+  const hash = crypto.createHash("sha256");
+  for await (const chunk of fs.createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+
+  return {
+    sha256: hash.digest("hex"),
+    byteSize: stat.size,
+    mimeType: mimeTypeFromPath(filePath, expectedMediaType),
+  };
+}
+
+function mimeTypeFromPath(filePath: string, expectedMediaType: "image" | "video"): string {
+  const ext = getExtension(filePath);
+  if (ext === "webm") return "video/webm";
+  if (ext === "mov") return "video/quicktime";
+  if (ext === "mp4" || expectedMediaType === "video") return "video/mp4";
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  return "image/jpeg";
 }
 
 async function assertSafeNetworkTarget(url: URL): Promise<void> {

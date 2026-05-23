@@ -9,6 +9,7 @@ export const ALLOWED_MEDIA_HOSTS = new Set([
   "i.ibb.co",
   "ibb.co",
 ]);
+export const PLATFORM_MEDIA_HOSTS = new Set(["www.tiktok.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"]);
 
 export const DEFAULT_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
@@ -74,7 +75,19 @@ export function mediaTypeFromUrl(rawUrl: string): MediaType {
 }
 
 export function isSupportedMediaUrl(rawUrl: string): boolean {
-  return mediaTypeFromUrl(rawUrl) !== "other";
+  return mediaTypeFromUrl(rawUrl) !== "other" || isPlatformMediaUrl(rawUrl);
+}
+
+export function isPlatformMediaUrl(rawUrl: string): boolean {
+  const url = toUrl(rawUrl);
+  if (!url) return false;
+  const hostname = url.hostname.toLowerCase();
+  if (!PLATFORM_MEDIA_HOSTS.has(hostname)) return false;
+
+  if (hostname === "youtu.be") return url.pathname.length > 1;
+  if (hostname.endsWith("youtube.com")) return url.pathname.startsWith("/shorts/");
+  if (hostname.endsWith("tiktok.com")) return url.pathname.length > 1;
+  return false;
 }
 
 export function mediaTypeFromContentType(contentType: string | null | undefined): MediaType {

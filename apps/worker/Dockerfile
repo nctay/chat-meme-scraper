@@ -21,6 +21,7 @@ RUN pnpm --filter worker build
 
 FROM base AS runtime
 ENV NODE_ENV=production
+RUN apk add --no-cache ffmpeg yt-dlp
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/prisma ./prisma

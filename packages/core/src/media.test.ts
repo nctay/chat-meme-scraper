@@ -16,6 +16,14 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://example.com/page")).toBe(false);
   });
 
+  it("detects supported platform video URLs", () => {
+    expect(isSupportedMediaUrl("https://www.tiktok.com/@example/video/1234567890")).toBe(true);
+    expect(isSupportedMediaUrl("https://vm.tiktok.com/ZMabcdef/")).toBe(true);
+    expect(isSupportedMediaUrl("https://www.youtube.com/shorts/abc123")).toBe(true);
+    expect(isSupportedMediaUrl("https://youtu.be/abc123")).toBe(true);
+    expect(isSupportedMediaUrl("https://www.youtube.com/watch?v=abc123")).toBe(false);
+  });
+
   it("detects signed Discord CDN image URLs", () => {
     const url =
       "https://cdn.discordapp.com/attachments/1506760976450584768/1507052247148658852/image.png?ex=6a107f47&is=6a0f2dc7&hm=d010d91051a0ae08e179d86a13eca6e3aa35bd56b97db01cfe7a3c81f24dcd86&";
