@@ -54,6 +54,11 @@ enum DownloadJobStatus {
   blocked
 }
 
+enum StorageProvider {
+  telegram
+  s3
+}
+
 model Streamer {
   id            String          @id @default(cuid())
   twitchUserId  String          @unique
@@ -109,29 +114,35 @@ model ChatPost {
 }
 
 model Asset {
-  id           String           @id @default(cuid())
-  originalUrl  String
-  normalizedUrl String          @unique
-  sha256       String?          @unique
-  s3Key        String?
-  publicUrl    String?
-  mimeType     String?
-  byteSize     BigInt?
-  mediaType    MediaType        @default(other)
-  status       AssetStatus      @default(pending)
-  visibility   AssetVisibility  @default(public)
-  deletedAt    DateTime?
-  deletedBy    String?
-  deleteReason String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  posts        ChatPost[]
-  jobs         DownloadJob[]
-  blockedMedia BlockedMedia[]
+  id                   String          @id @default(cuid())
+  originalUrl          String
+  normalizedUrl        String          @unique
+  sha256               String?         @unique
+  storageProvider      StorageProvider @default(telegram)
+  telegramChatId       String?
+  telegramMessageId    Int?
+  telegramFileId       String?
+  telegramFileUniqueId String?
+  s3Key                String?
+  publicUrl            String?
+  mimeType             String?
+  byteSize             BigInt?
+  mediaType            MediaType       @default(other)
+  status               AssetStatus     @default(pending)
+  visibility           AssetVisibility @default(public)
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteReason         String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  posts                ChatPost[]
+  jobs                 DownloadJob[]
+  blockedMedia         BlockedMedia[]
 
   @@index([status])
   @@index([visibility])
   @@index([mediaType])
+  @@index([storageProvider])
   @@map("assets")
 }
 

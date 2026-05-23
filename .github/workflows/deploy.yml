@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["main", "master"]
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -28,17 +32,77 @@ jobs:
     if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
+    env:
+      APP_DIR: ${{ secrets.VPS_APP_DIR || '/srv/chat-meme-scraper' }}
+      BOT_IMAGE: ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-bot:${{ github.sha }}
+      WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-worker:${{ github.sha }}
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ github.token }}
+      PROD_ENV_B64: ${{ secrets.PROD_ENV_B64 }}
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.WORKER_IMAGE }}
+            ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-worker:latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/bot/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BOT_IMAGE }}
+            ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-bot:latest
+
       - uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: APP_DIR
           script: |
             set -e
-            cd /srv/twitch-media-archive
-            git pull --ff-only
-            docker compose build
-            docker compose run --rm api pnpm db:migrate
-            docker compose up -d
-            curl -fsS http://127.0.0.1:3000/api/health
+            mkdir -p "$APP_DIR"
+
+      - uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: ${{ secrets.VPS_APP_DIR || '/srv/chat-meme-scraper' }}
+
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: APP_DIR,PROD_ENV_B64,BOT_IMAGE,WORKER_IMAGE,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -e
+            cd "$APP_DIR"
+            printf '%s' "$PROD_ENV_B64" | base64 -d > .env
+            {
+              echo "BOT_IMAGE=$BOT_IMAGE"
+              echo "WORKER_IMAGE=$WORKER_IMAGE"
+            } >> .env
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            docker compose -f docker-compose.prod.yml pull worker bot
+            docker compose -f docker-compose.prod.yml up -d postgres
+            docker compose -f docker-compose.prod.yml run --rm worker pnpm db:migrate
+            docker compose -f docker-compose.prod.yml up -d worker bot
+            docker compose -f docker-compose.prod.yml ps

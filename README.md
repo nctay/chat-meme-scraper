@@ -1,92 +1,87 @@
-# Twitch Media Archive
+# Twitch Telegram Archive
 
-Архиватор картинок и коротких видео из Twitch-чата: Node.js worker читает чат, скачивает разрешенные media URL, дедуплицирует по URL и SHA-256, кладет файлы в SpaceWeb S3 и показывает публичную ленту на React.
+Telegram-only архиватор медиа из Twitch-чата.
 
-## Быстрый старт
+Схема v1:
+
+- `worker` читает Twitch chat, скачивает картинки/видео, дедуплицирует по URL/SHA-256 и сохраняет оригинальное сообщение в приватный Telegram storage-канал.
+- `bot` запускает два Telegram-бота: админский для модерации и публичный для просмотра архива.
+- `postgres` хранит стримеров, стримы, сообщения, assets, moderation/blocklist.
+
+## Локальный запуск
 
 ```bash
 pnpm install
 cp .env.example .env
-node scripts/hash-admin-password.js "your-password"
 pnpm db:generate
 docker compose up -d postgres
-pnpm db:dev
-pnpm dev:api
-pnpm dev:worker
-pnpm dev
+docker compose run --rm worker pnpm db:migrate
+docker compose up --build worker bot
 ```
 
-Frontend: `http://127.0.0.1:3000`  
-API health: `http://127.0.0.1:3000/api/health`
+В `.env` нужны реальные Twitch и Telegram значения:
 
-## Локальный запуск с реальным Twitch-чатом
+```env
+DATABASE_URL="postgresql://archive:archive@postgres:5432/archive?schema=public"
 
-Этот режим использует реальные Twitch API/IRC и локальный MinIO вместо SpaceWeb S3.
+TWITCH_CLIENT_ID=""
+TWITCH_CLIENT_SECRET=""
+TWITCH_EVENTSUB_USER_TOKEN=""
+TWITCH_BOT_USERNAME=""
+TWITCH_BOT_OAUTH="oauth:"
+TWITCH_CHANNELS="streamer_login"
 
-1. Создай Twitch app в Developer Console и заполни:
-   - `TWITCH_CLIENT_ID`
-   - `TWITCH_CLIENT_SECRET`
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_STORAGE_CHAT_ID="-100..."
+TELEGRAM_ALLOWED_USER_IDS="123456789"
+TELEGRAM_PUBLIC_BOT_TOKEN=""
 
-2. Получи user access token для bot-аккаунта со scope `chat:read`.
-   В `.env` для IRC он должен быть в формате `oauth:<token>`.
+MAX_IMAGE_BYTES="31457280"
+MAX_VIDEO_BYTES="157286400"
+MAX_DAILY_DOWNLOAD_BYTES="10737418240"
+MAX_PARALLEL_DOWNLOADS="2"
+ALLOW_PRIVATE_MEDIA_HOSTS="false"
+```
 
-3. Для EventSub WebSocket можно использовать user access token без префикса `oauth:`:
-   - `TWITCH_EVENTSUB_USER_TOKEN="<token>"`
+Админского и публичного Telegram-ботов добавь в приватный storage-канал, чтобы оба могли делать `copyMessage`.
 
-4. Подготовь env:
+## VPS Deploy
+
+GitHub Actions workflow: `.github/workflows/deploy.yml`.
+
+На push в `main`/`master` он:
+
+1. ставит зависимости;
+2. генерирует Prisma client;
+3. запускает typecheck/test/build;
+4. билдит `worker` и `bot` Docker images;
+5. пушит images в GitHub Container Registry;
+6. заходит на VPS по SSH;
+7. копирует `docker-compose.prod.yml`;
+8. пишет `.env` из GitHub secret `PROD_ENV_B64`;
+9. логинится в GHCR;
+10. тянет свежие images;
+11. применяет миграции;
+12. поднимает `postgres`, `worker`, `bot`.
+
+На VPS исходники не нужны. Нужны только Docker, папка приложения, `.env` и `docker-compose.prod.yml`, которые workflow подготовит сам.
+
+Нужные GitHub Secrets:
+
+- `VPS_HOST`
+- `VPS_USER`
+- `VPS_SSH_KEY`
+- `VPS_APP_DIR`, опционально, по умолчанию `/srv/chat-meme-scraper`
+- `PROD_ENV_B64`
+
+Сгенерировать `PROD_ENV_B64`:
 
 ```bash
-cp .env.twitch-local.example .env
-node scripts/hash-admin-password.js "admin-password"
+base64 -w 0 .env
 ```
 
-Вставь hash в `ADMIN_PASSWORD_HASH`, затем заполни Twitch-поля и `TWITCH_CHANNELS`.
-
-5. Подними локальное хранилище и приложение:
+На macOS:
 
 ```bash
-pnpm install
-pnpm db:generate
-docker compose up -d postgres minio
-docker compose run --rm api pnpm db:migrate
-pnpm s3:local
-docker compose up -d --build api worker web
+base64 -i .env | tr -d '\n'
 ```
-
-6. Открой:
-
-- App: `http://127.0.0.1:3000`
-- Admin: `http://127.0.0.1:3000/#admin`
-- API: `http://127.0.0.1:3000/api/health`
-- MinIO: `http://127.0.0.1:9001`
-
-7. Смотри worker logs:
-
-```bash
-docker compose logs -f worker
-```
-
-Проверить данные:
-
-```bash
-docker compose exec postgres psql -U archive -d archive -c "select status, visibility, \"publicUrl\" from assets;"
-```
-
-Важно: streamer должен быть live или в чате должны появляться сообщения со ссылками на поддерживаемые media URL. Реальные Discord/IBB/direct media ссылки будут скачиваться worker’ом, хешироваться, заливаться в MinIO и появляться во фронте.
-
-## Продакшен
-
-На VPS хранится `.env`, GitHub Actions по SSH делает:
-
-```bash
-git pull --ff-only
-docker compose build
-docker compose run --rm api pnpm db:migrate
-docker compose up -d
-```
-
-Медиа раздается напрямую из публичного SpaceWeb S3, не через VPS.
-
-## Модерация
-
-Админка доступна по `/#admin`. Действие `Delete permanently` удаляет объект из S3, ставит `assets.status = deleted`, очищает `publicUrl` и добавляет `normalizedUrl`/`sha256` в `blocked_media`, чтобы тот же контент не загрузился повторно.

@@ -1,26 +1,22 @@
 {
-  "name": "worker",
+  "name": "bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/worker.ts",
-    "start": "node dist/worker.js",
+    "dev": "tsx watch src/bot.ts",
+    "start": "node dist/bot.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@archive/core": "workspace:*",
     "@prisma/client": "^6.10.1",
     "grammy": "^1.38.1",
-    "tmi.js": "^1.8.5",
-    "ws": "^8.18.2",
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
     "vitest": "^3.2.4"
   }
 }

@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { assertSafeResolvedAddress, assertSafeUrl, getExtension, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
+import { assertSafeResolvedAddress, assertSafeUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
-import { uploadFile } from "./s3.js";
+import { storeMedia } from "./storage.js";
 
 type DownloadResult = {
   filePath: string;
@@ -25,17 +25,8 @@ export async function processDownloadQueue(): Promise<void> {
 }
 
 async function processOneJob(): Promise<void> {
-  const job = await prisma.downloadJob.findFirst({
-    where: {
-      status: "pending",
-      OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
-    },
-    orderBy: { createdAt: "asc" },
-    include: { chatPost: { include: { streamSession: { include: { streamer: true } } } } },
-  });
+  const job = await claimDownloadJob();
   if (!job) return;
-
-  await prisma.downloadJob.update({ where: { id: job.id }, data: { status: "running", attempts: { increment: 1 } } });
 
   try {
     const normalizedUrl = normalizeUrl(job.url);
@@ -72,8 +63,14 @@ async function processOneJob(): Promise<void> {
       }
 
       const assetId = existingByUrl?.id ?? crypto.randomUUID();
-      const s3Key = buildS3Key(job.chatPost.streamSession.streamer.login, job.chatPost.streamSession.id, assetId, downloaded.finalUrl);
-      const publicUrl = await uploadFile(s3Key, downloaded.filePath, downloaded.mimeType);
+      const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
+        originalUrl: job.url,
+        normalizedUrl,
+        sha256: downloaded.sha256,
+        streamerLogin: job.chatPost.streamSession.streamer.login,
+        streamSessionId: job.chatPost.streamSession.id,
+        assetId,
+      });
 
       const asset = await prisma.asset.upsert({
         where: { normalizedUrl },
@@ -82,8 +79,13 @@ async function processOneJob(): Promise<void> {
           originalUrl: job.url,
           normalizedUrl,
           sha256: downloaded.sha256,
-          s3Key,
-          publicUrl,
+          storageProvider: stored.storageProvider,
+          telegramChatId: stored.telegramChatId,
+          telegramMessageId: stored.telegramMessageId,
+          telegramFileId: stored.telegramFileId,
+          telegramFileUniqueId: stored.telegramFileUniqueId,
+          s3Key: stored.s3Key,
+          publicUrl: stored.publicUrl,
           mimeType: downloaded.mimeType,
           byteSize: downloaded.byteSize,
           mediaType: downloaded.mediaType,
@@ -92,8 +94,13 @@ async function processOneJob(): Promise<void> {
         },
         update: {
           sha256: downloaded.sha256,
-          s3Key,
-          publicUrl,
+          storageProvider: stored.storageProvider,
+          telegramChatId: stored.telegramChatId,
+          telegramMessageId: stored.telegramMessageId,
+          telegramFileId: stored.telegramFileId,
+          telegramFileUniqueId: stored.telegramFileUniqueId,
+          s3Key: stored.s3Key,
+          publicUrl: stored.publicUrl,
           mimeType: downloaded.mimeType,
           byteSize: downloaded.byteSize,
           mediaType: downloaded.mediaType,
@@ -109,20 +116,45 @@ async function processOneJob(): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const nextAttempts = job.attempts + 1;
-    const retry = nextAttempts < 3;
+    const currentAttempts = job.attempts;
+    const retry = currentAttempts < 3;
     await prisma.downloadJob.update({
       where: { id: job.id },
       data: {
         status: retry ? "pending" : "failed",
         lastError: message,
-        nextRetryAt: retry ? new Date(Date.now() + 60_000 * nextAttempts) : null,
+        nextRetryAt: retry ? new Date(Date.now() + 60_000 * currentAttempts) : null,
       },
     });
     if (!retry) {
       await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { status: "failed" } });
     }
   }
+}
+
+async function claimDownloadJob() {
+  const claimed = await prisma.$queryRaw<Array<{ id: string }>>`
+    UPDATE "download_jobs"
+    SET "status" = 'running',
+        "attempts" = "attempts" + 1,
+        "updatedAt" = NOW()
+    WHERE "id" = (
+      SELECT "id"
+      FROM "download_jobs"
+      WHERE "status" = 'pending'
+        AND ("nextRetryAt" IS NULL OR "nextRetryAt" <= NOW())
+      ORDER BY "createdAt" ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    )
+    RETURNING "id"
+  `;
+  const id = claimed[0]?.id;
+  if (!id) return null;
+  return prisma.downloadJob.findUnique({
+    where: { id },
+    include: { chatPost: { include: { streamSession: { include: { streamer: true } } } } },
+  });
 }
 
 async function downloadMedia(rawUrl: string): Promise<DownloadResult> {
@@ -172,7 +204,12 @@ async function downloadMedia(rawUrl: string): Promise<DownloadResult> {
       },
     });
 
-    await pipeline(Readable.fromWeb(get.body as Parameters<typeof Readable.fromWeb>[0]), limiter, fs.createWriteStream(tempPath));
+    try {
+      await pipeline(Readable.fromWeb(get.body as Parameters<typeof Readable.fromWeb>[0]), limiter, fs.createWriteStream(tempPath));
+    } catch (error) {
+      await fs.promises.rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
     return {
       filePath: tempPath,
       sha256: hash.digest("hex"),
@@ -201,12 +238,6 @@ function redirectUrl(base: URL, response: Response): URL {
   const location = response.headers.get("location");
   if (!location) throw new Error("Redirect without location");
   return new URL(location, base);
-}
-
-function buildS3Key(streamerLogin: string, sessionId: string, assetId: string, url: string): string {
-  const date = new Date().toISOString().slice(0, 10);
-  const ext = getExtension(url) ?? "bin";
-  return `${streamerLogin}/${date}/${sessionId}/${assetId}.${ext}`;
 }
 
 async function assertDailyLimitAvailable(): Promise<void> {
