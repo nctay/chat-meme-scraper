@@ -31,6 +31,7 @@ export async function processDownloadQueue(): Promise<void> {
 async function processOneJob(): Promise<void> {
   const job = await claimDownloadJob();
   if (!job) return;
+  console.log(`[download] started job=${job.id} asset=${job.assetId ?? "none"} url=${job.url}`);
 
   try {
     const normalizedUrl = normalizeUrl(job.url);
@@ -46,6 +47,7 @@ async function processOneJob(): Promise<void> {
     const existingStoredAsset = existingByUrl?.status === "stored" ? existingByUrl : await findStoredAssetForNormalizedUrl(normalizedUrl);
     if (existingStoredAsset) {
       await markStoredReferences(existingStoredAsset.id, normalizedUrl, job.id, job.chatPostId, existingByUrl?.id ?? job.assetId);
+      console.log(`[download] reused-stored job=${job.id} asset=${existingStoredAsset.id}`);
       return;
     }
 
@@ -118,6 +120,7 @@ async function processOneJob(): Promise<void> {
         });
 
         await markStoredReferences(asset.id, normalizedUrl, job.id, job.chatPostId);
+        console.log(`[download] stored job=${job.id} asset=${asset.id} bytes=${downloaded.byteSize} mime=${downloaded.mimeType}`);
       });
     } finally {
       fs.promises.rm(downloaded.filePath, { force: true }).catch(() => undefined);
@@ -137,6 +140,7 @@ async function processOneJob(): Promise<void> {
     if (!retry) {
       await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { status: "failed" } });
     }
+    console.error(`[download] failed job=${job.id} asset=${job.assetId ?? "none"} attempts=${currentAttempts} retry=${retry} error=${message}`);
   }
 }
 
@@ -324,7 +328,9 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
   assertSafeUrl(url);
 
   const limit = env.MAX_VIDEO_BYTES;
+  console.log(`[platform] metadata url=${url.toString()}`);
   await assertPlatformVideoFits(url.toString(), limit);
+  console.log(`[platform] downloading url=${url.toString()}`);
 
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-platform-"));
   const outputTemplate = path.join(tempDir, "%(id)s.%(ext)s");
@@ -357,6 +363,7 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
       await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
       throw new Error(`Platform video exceeded byte limit ${limit}`);
     }
+    console.log(`[platform] downloaded url=${url.toString()} bytes=${result.byteSize} mime=${result.mimeType}`);
 
     return {
       ...result,

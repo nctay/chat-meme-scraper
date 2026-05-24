@@ -211,14 +211,13 @@ async function sendLatest(ctx: Context, type: MediaFilter, offset: number): Prom
       },
     },
     orderBy: { postedAt: "desc" },
-    distinct: ["assetId"],
     skip: offset,
     take: pageSize,
     include: { asset: true, streamSession: { include: { streamer: true } } },
   });
 
   await ctx.reply(titleForFilter(type), { reply_markup: latestKeyboard(type, offset + pageSize) });
-  await sendPosts(ctx, uniquePostsByAsset(posts));
+  await sendPosts(ctx, uniquePostsByStreamAsset(posts));
 }
 
 async function sendStream(ctx: Context, streamId: string, type: MediaFilter, offset: number): Promise<void> {
@@ -408,7 +407,6 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
 }
 
 async function sendPosts(ctx: Context, posts: PostWithMedia[]): Promise<void> {
-  posts = uniquePostsByAsset(posts);
   if (posts.length === 0) {
     await ctx.reply("Медиа не найдено.");
     return;
@@ -480,6 +478,18 @@ function uniquePostsByAsset<T extends { assetId: string | null; asset?: { id: st
     if (!assetId) return true;
     if (seen.has(assetId)) return false;
     seen.add(assetId);
+    return true;
+  });
+}
+
+function uniquePostsByStreamAsset<T extends { streamSessionId: string; assetId: string | null; asset?: { id: string } | null }>(posts: T[]): T[] {
+  const seen = new Set<string>();
+  return posts.filter((post) => {
+    const assetId = post.assetId ?? post.asset?.id;
+    if (!assetId) return true;
+    const key = `${post.streamSessionId}:${assetId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
