@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
+import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
 
 type TwitchStream = {
   id: string;
@@ -17,7 +18,6 @@ let appToken: { value: string; expiresAt: number } | null = null;
 let chatClient: InstanceType<typeof tmi.Client> | null = null;
 let chatConnecting = false;
 let eventSubSocket: WebSocket | null = null;
-const offlineGraceMs = 30 * 60 * 1000;
 
 export async function pollTwitchStreams(): Promise<void> {
   if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || channelLogins().length === 0) return;
@@ -426,10 +426,6 @@ async function finalizeExpiredGraceSessions(): Promise<void> {
     data: { status: "ended" },
   });
   if (update.count > 0) console.log(`[twitch] finalized grace sessions=${update.count}`);
-}
-
-export function isWithinOfflineGrace(endedAt: Date | null, startedAt: Date): boolean {
-  return Boolean(endedAt && startedAt.getTime() - endedAt.getTime() <= offlineGraceMs);
 }
 
 async function getAppToken(): Promise<string> {

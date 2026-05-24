@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWithinOfflineGrace } from "./twitch.js";
+import { isWithinOfflineGrace } from "./stream-grace.js";
 
 describe("twitch stream session grace", () => {
   it("keeps reconnects within thirty minutes in the same session", () => {
