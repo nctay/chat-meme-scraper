@@ -70,9 +70,10 @@ async function publishTelegramMedia(storageChatId: number | string, storageMessa
 
 function publicChannelCaption(metadata: StoreMediaMetadata): string {
   const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
-  const dateTag = hashtag(formatStreamDateTag(metadata.streamStartedAt));
+  const dateTag = hashtag(`date_${formatStreamDateTag(metadata.streamStartedAt)}`);
+  const senderTag = hashtag(`user_${metadata.authorName}`);
   const text = stripUrls(metadata.messageText).replace(/\s+/g, " ").trim();
-  const prefix = `${streamerTag} ${dateTag} ${metadata.authorName}:`;
+  const prefix = `${streamerTag} ${dateTag} ${senderTag}:`;
   return truncate(text ? `${prefix} ${text}` : prefix, 1000);
 }
 
