@@ -270,6 +270,7 @@ export async function ingestChatMessage(input: {
     }
 
     const existingAsset = await prisma.asset.findUnique({ where: { normalizedUrl } });
+    const reusableAsset = existingAsset?.status === "stored" ? existingAsset : await findStoredAssetForNormalizedUrl(normalizedUrl);
     const post = await prisma.chatPost.create({
       data: {
         streamSessionId: session.id,
@@ -280,22 +281,39 @@ export async function ingestChatMessage(input: {
         originalUrl: rawUrl,
         normalizedUrl,
         postedAt: input.postedAt,
-        assetId: existingAsset?.status === "stored" ? existingAsset.id : undefined,
-        status: existingAsset?.status === "stored" ? "stored" : "pending",
+        assetId: reusableAsset?.id ?? existingAsset?.id,
+        status: reusableAsset ? "stored" : "pending",
       },
     });
 
-    if (!existingAsset || existingAsset.status !== "stored") {
+    if (reusableAsset) {
+      console.log(`[download] reused asset=${reusableAsset.id} chatPost=${post.id}`);
+    } else {
       const asset =
         existingAsset ??
-        (await prisma.asset.create({
-          data: {
+        (await prisma.asset.upsert({
+          where: { normalizedUrl },
+          update: {},
+          create: {
             originalUrl: rawUrl,
             normalizedUrl,
             mediaType: "other",
             status: "pending",
           },
         }));
+
+      const activeJob = await prisma.downloadJob.findFirst({
+        where: {
+          assetId: asset.id,
+          status: { in: ["pending", "running"] },
+        },
+      });
+
+      if (activeJob) {
+        await prisma.chatPost.update({ where: { id: post.id }, data: { assetId: asset.id } });
+        console.log(`[download] duplicate pending asset=${asset.id} chatPost=${post.id}`);
+        continue;
+      }
 
       await prisma.downloadJob.create({
         data: {
@@ -306,10 +324,21 @@ export async function ingestChatMessage(input: {
         },
       });
       console.log(`[download] queued chatPost=${post.id} asset=${asset.id}`);
-    } else {
-      console.log(`[download] reused asset=${existingAsset.id} chatPost=${post.id}`);
     }
   }
+}
+
+async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {
+  const post = await prisma.chatPost.findFirst({
+    where: {
+      normalizedUrl,
+      status: "stored",
+      asset: { status: "stored" },
+    },
+    orderBy: { postedAt: "asc" },
+    include: { asset: true },
+  });
+  return post?.asset ?? null;
 }
 
 async function syncConfiguredStreamers(token: string): Promise<void> {

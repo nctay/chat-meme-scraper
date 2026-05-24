@@ -211,13 +211,14 @@ async function sendLatest(ctx: Context, type: MediaFilter, offset: number): Prom
       },
     },
     orderBy: { postedAt: "desc" },
+    distinct: ["assetId"],
     skip: offset,
     take: pageSize,
     include: { asset: true, streamSession: { include: { streamer: true } } },
   });
 
   await ctx.reply(titleForFilter(type), { reply_markup: latestKeyboard(type, offset + pageSize) });
-  await sendPosts(ctx, posts);
+  await sendPosts(ctx, uniquePostsByAsset(posts));
 }
 
 async function sendStream(ctx: Context, streamId: string, type: MediaFilter, offset: number): Promise<void> {
@@ -241,6 +242,7 @@ async function sendStream(ctx: Context, streamId: string, type: MediaFilter, off
       },
     },
     orderBy: { postedAt: "desc" },
+    distinct: ["assetId"],
     skip: offset,
     take: pageSize,
     include: { asset: true, streamSession: { include: { streamer: true } } },
@@ -249,7 +251,7 @@ async function sendStream(ctx: Context, streamId: string, type: MediaFilter, off
   await ctx.reply(`${session.streamer.displayName} / ${formatDate(session.startedAt)}\n${session.title ?? "Без названия"}`, {
     reply_markup: streamKeyboard(streamId, type, offset + pageSize),
   });
-  await sendPosts(ctx, posts);
+  await sendPosts(ctx, uniquePostsByAsset(posts));
 }
 
 async function sendStreams(ctx: Context, offset: number): Promise<void> {
@@ -367,6 +369,7 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
       ...publicStoredPostWhere(),
     },
     orderBy: { postedAt: "desc" },
+    distinct: ["assetId"],
     skip: offset,
     take: publicPageSize,
     include: { asset: true },
@@ -385,7 +388,7 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
   await withTelegramRetry(() => ctx.reply(`${session.streamer.displayName} / ${formatDate(session.startedAt)}`));
 
   let copied = 0;
-  for (const post of posts) {
+  for (const post of uniquePostsByAsset(posts)) {
     const asset = post.asset;
     if (!asset?.telegramChatId || !asset.telegramMessageId) continue;
 
@@ -405,6 +408,7 @@ async function sendPublicMessages(ctx: Context, streamId: string, offset: number
 }
 
 async function sendPosts(ctx: Context, posts: PostWithMedia[]): Promise<void> {
+  posts = uniquePostsByAsset(posts);
   if (posts.length === 0) {
     await ctx.reply("Медиа не найдено.");
     return;
@@ -467,6 +471,17 @@ function publicStoredPostWhere() {
       visibility: "public" as const,
     },
   };
+}
+
+function uniquePostsByAsset<T extends { assetId: string | null; asset?: { id: string } | null }>(posts: T[]): T[] {
+  const seen = new Set<string>();
+  return posts.filter((post) => {
+    const assetId = post.assetId ?? post.asset?.id;
+    if (!assetId) return true;
+    if (seen.has(assetId)) return false;
+    seen.add(assetId);
+    return true;
+  });
 }
 
 function publicStreamerAccessWhere(ctx: Context) {

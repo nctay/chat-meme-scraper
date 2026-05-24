@@ -21,6 +21,8 @@ type DownloadResult = {
   finalUrl: string;
 };
 
+const shaLocks = new Map<string, Promise<void>>();
+
 export async function processDownloadQueue(): Promise<void> {
   const slots = Math.max(1, env.MAX_PARALLEL_DOWNLOADS);
   await Promise.all(Array.from({ length: slots }, () => processOneJob()));
@@ -41,9 +43,9 @@ async function processOneJob(): Promise<void> {
     }
 
     const existingByUrl = await prisma.asset.findUnique({ where: { normalizedUrl } });
-    if (existingByUrl?.status === "stored") {
-      await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { assetId: existingByUrl.id, status: "stored" } });
-      await prisma.downloadJob.update({ where: { id: job.id }, data: { assetId: existingByUrl.id, status: "done" } });
+    const existingStoredAsset = existingByUrl?.status === "stored" ? existingByUrl : await findStoredAssetForNormalizedUrl(normalizedUrl);
+    if (existingStoredAsset) {
+      await markStoredReferences(existingStoredAsset.id, normalizedUrl, job.id, job.chatPostId, existingByUrl?.id ?? job.assetId);
       return;
     }
 
@@ -51,72 +53,72 @@ async function processOneJob(): Promise<void> {
     const downloaded = await downloadMedia(job.url);
 
     try {
-      const blockedByHash = await prisma.blockedMedia.findUnique({ where: { sha256: downloaded.sha256 } });
-      if (blockedByHash) {
-        await markBlocked(job.id, job.chatPostId, "SHA-256 is blocked");
-        return;
-      }
+      await withShaLock(downloaded.sha256, async () => {
+        const blockedByHash = await prisma.blockedMedia.findUnique({ where: { sha256: downloaded.sha256 } });
+        if (blockedByHash) {
+          await markBlocked(job.id, job.chatPostId, "SHA-256 is blocked");
+          return;
+        }
 
-      const existingByHash = await prisma.asset.findUnique({ where: { sha256: downloaded.sha256 } });
-      if (existingByHash?.status === "stored") {
-        await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { assetId: existingByHash.id, status: "stored" } });
-        await prisma.downloadJob.update({ where: { id: job.id }, data: { assetId: existingByHash.id, status: "done" } });
-        return;
-      }
+        const existingByHash = await prisma.asset.findUnique({ where: { sha256: downloaded.sha256 } });
+        if (existingByHash?.status === "stored") {
+          await markStoredReferences(existingByHash.id, normalizedUrl, job.id, job.chatPostId, existingByUrl?.id ?? job.assetId);
+          return;
+        }
 
-      const assetId = existingByUrl?.id ?? crypto.randomUUID();
-      const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
-        originalUrl: job.url,
-        normalizedUrl,
-        sha256: downloaded.sha256,
-        streamerLogin: job.chatPost.streamSession.streamer.login,
-        streamerDisplayName: job.chatPost.streamSession.streamer.displayName,
-        streamStartedAt: job.chatPost.streamSession.startedAt,
-        streamSessionId: job.chatPost.streamSession.id,
-        assetId,
-        authorName: job.chatPost.authorName,
-        messageText: job.chatPost.messageText,
-      });
-
-      const asset = await prisma.asset.upsert({
-        where: { normalizedUrl },
-        create: {
-          id: assetId,
+        const assetId = existingByUrl?.id ?? crypto.randomUUID();
+        const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
           originalUrl: job.url,
           normalizedUrl,
           sha256: downloaded.sha256,
-          storageProvider: stored.storageProvider,
-          telegramChatId: stored.telegramChatId,
-          telegramMessageId: stored.telegramMessageId,
-          telegramFileId: stored.telegramFileId,
-          telegramFileUniqueId: stored.telegramFileUniqueId,
-          s3Key: stored.s3Key,
-          publicUrl: stored.publicUrl,
-          mimeType: downloaded.mimeType,
-          byteSize: downloaded.byteSize,
-          mediaType: downloaded.mediaType,
-          status: "stored",
-          visibility: "public",
-        },
-        update: {
-          sha256: downloaded.sha256,
-          storageProvider: stored.storageProvider,
-          telegramChatId: stored.telegramChatId,
-          telegramMessageId: stored.telegramMessageId,
-          telegramFileId: stored.telegramFileId,
-          telegramFileUniqueId: stored.telegramFileUniqueId,
-          s3Key: stored.s3Key,
-          publicUrl: stored.publicUrl,
-          mimeType: downloaded.mimeType,
-          byteSize: downloaded.byteSize,
-          mediaType: downloaded.mediaType,
-          status: "stored",
-          visibility: "public",
-        },
-      });
+          streamerLogin: job.chatPost.streamSession.streamer.login,
+          streamerDisplayName: job.chatPost.streamSession.streamer.displayName,
+          streamStartedAt: job.chatPost.streamSession.startedAt,
+          streamSessionId: job.chatPost.streamSession.id,
+          assetId,
+          authorName: job.chatPost.authorName,
+          messageText: job.chatPost.messageText,
+        });
 
-      await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { assetId: asset.id, status: "stored" } });
-      await prisma.downloadJob.update({ where: { id: job.id }, data: { assetId: asset.id, status: "done" } });
+        const asset = await prisma.asset.upsert({
+          where: { normalizedUrl },
+          create: {
+            id: assetId,
+            originalUrl: job.url,
+            normalizedUrl,
+            sha256: downloaded.sha256,
+            storageProvider: stored.storageProvider,
+            telegramChatId: stored.telegramChatId,
+            telegramMessageId: stored.telegramMessageId,
+            telegramFileId: stored.telegramFileId,
+            telegramFileUniqueId: stored.telegramFileUniqueId,
+            s3Key: stored.s3Key,
+            publicUrl: stored.publicUrl,
+            mimeType: downloaded.mimeType,
+            byteSize: downloaded.byteSize,
+            mediaType: downloaded.mediaType,
+            status: "stored",
+            visibility: "public",
+          },
+          update: {
+            sha256: downloaded.sha256,
+            storageProvider: stored.storageProvider,
+            telegramChatId: stored.telegramChatId,
+            telegramMessageId: stored.telegramMessageId,
+            telegramFileId: stored.telegramFileId,
+            telegramFileUniqueId: stored.telegramFileUniqueId,
+            s3Key: stored.s3Key,
+            publicUrl: stored.publicUrl,
+            mimeType: downloaded.mimeType,
+            byteSize: downloaded.byteSize,
+            mediaType: downloaded.mediaType,
+            status: "stored",
+            visibility: "public",
+          },
+        });
+
+        await markStoredReferences(asset.id, normalizedUrl, job.id, job.chatPostId);
+      });
     } finally {
       fs.promises.rm(downloaded.filePath, { force: true }).catch(() => undefined);
     }
@@ -149,6 +151,12 @@ async function claimDownloadJob() {
       FROM "download_jobs"
       WHERE "status" = 'pending'
         AND ("nextRetryAt" IS NULL OR "nextRetryAt" <= NOW())
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "download_jobs" AS running
+          WHERE running."assetId" IS NOT DISTINCT FROM "download_jobs"."assetId"
+            AND running."status" = 'running'
+        )
       ORDER BY "createdAt" ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
@@ -161,6 +169,78 @@ async function claimDownloadJob() {
     where: { id },
     include: { chatPost: { include: { streamSession: { include: { streamer: true } } } } },
   });
+}
+
+async function markStoredReferences(assetId: string, normalizedUrl: string, jobId: string, chatPostId: string, staleAssetId?: string | null): Promise<void> {
+  const duplicateAssetIds = [assetId, staleAssetId].filter((id): id is string => Boolean(id));
+
+  await prisma.$transaction([
+    prisma.chatPost.updateMany({
+      where: {
+        status: { in: ["pending", "failed"] },
+        OR: [{ id: chatPostId }, { assetId: { in: duplicateAssetIds } }, { normalizedUrl }],
+      },
+      data: {
+        assetId,
+        status: "stored",
+      },
+    }),
+    prisma.downloadJob.updateMany({
+      where: {
+        id: { not: jobId },
+        assetId: { in: duplicateAssetIds },
+        status: { in: ["pending", "failed"] },
+      },
+      data: {
+        assetId,
+        status: "done",
+        nextRetryAt: null,
+        lastError: null,
+      },
+    }),
+    prisma.downloadJob.update({
+      where: { id: jobId },
+      data: {
+        assetId,
+        status: "done",
+        nextRetryAt: null,
+        lastError: null,
+      },
+    }),
+  ]);
+}
+
+async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {
+  const post = await prisma.chatPost.findFirst({
+    where: {
+      normalizedUrl,
+      status: "stored",
+      asset: { status: "stored" },
+    },
+    orderBy: { postedAt: "asc" },
+    include: { asset: true },
+  });
+  return post?.asset ?? null;
+}
+
+async function withShaLock<T>(sha256: string, task: () => Promise<T>): Promise<T> {
+  const previous = shaLocks.get(sha256) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = previous.catch(() => undefined).then(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  shaLocks.set(sha256, current);
+  await previous.catch(() => undefined);
+
+  try {
+    return await task();
+  } finally {
+    release();
+    if (shaLocks.get(sha256) === current) shaLocks.delete(sha256);
+  }
 }
 
 async function downloadMedia(rawUrl: string): Promise<DownloadResult> {

@@ -28,13 +28,16 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   ].join("\n");
 
   const input = new InputFile(fs.createReadStream(filePath), fileName(filePath, mimeType, mediaType));
-  const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage>(async () => {
+  const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage | Message.AnimationMessage>(async () => {
+    if (isGif(mimeType)) {
+      return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
+    }
     if (mediaType === "image") {
       return telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
     }
     return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, supports_streaming: true });
   });
-  const file = "photo" in message ? message.photo.at(-1) : message.video;
+  const file = "photo" in message ? message.photo.at(-1) : "video" in message ? message.video : message.animation;
   if (!file) throw new Error("Telegram did not return stored file metadata");
 
   await publishTelegramMedia(message.chat.id, message.message_id, metadata);
@@ -56,6 +59,10 @@ export async function deleteTelegramMedia(asset: { telegramChatId: string | null
 function fileName(filePath: string, mimeType: string, mediaType: "image" | "video"): string {
   const ext = mimeType.split("/")[1]?.split("+")[0] || (mediaType === "image" ? "jpg" : "mp4");
   return `${path.basename(filePath)}.${ext}`;
+}
+
+function isGif(mimeType: string): boolean {
+  return mimeType.split(";")[0]?.trim().toLowerCase() === "image/gif";
 }
 
 async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: StoreMediaMetadata): Promise<void> {
