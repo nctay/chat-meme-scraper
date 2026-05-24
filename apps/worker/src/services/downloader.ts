@@ -70,8 +70,12 @@ async function processOneJob(): Promise<void> {
         normalizedUrl,
         sha256: downloaded.sha256,
         streamerLogin: job.chatPost.streamSession.streamer.login,
+        streamerDisplayName: job.chatPost.streamSession.streamer.displayName,
+        streamStartedAt: job.chatPost.streamSession.startedAt,
         streamSessionId: job.chatPost.streamSession.id,
         assetId,
+        authorName: job.chatPost.authorName,
+        messageText: job.chatPost.messageText,
       });
 
       const asset = await prisma.asset.upsert({

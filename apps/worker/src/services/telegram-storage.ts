@@ -8,6 +8,7 @@ import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
 let bot: Bot | null = null;
 const storageSendLimiter = new SerialRateLimiter(1100);
+const publicChannelSendLimiter = new SerialRateLimiter(1100);
 
 function telegramBot(): Bot {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -36,6 +37,8 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   const file = "photo" in message ? message.photo.at(-1) : message.video;
   if (!file) throw new Error("Telegram did not return stored file metadata");
 
+  await publishTelegramMedia(message.chat.id, message.message_id, metadata);
+
   return {
     storageProvider: "telegram",
     telegramChatId: String(message.chat.id),
@@ -53,4 +56,47 @@ export async function deleteTelegramMedia(asset: { telegramChatId: string | null
 function fileName(filePath: string, mimeType: string, mediaType: "image" | "video"): string {
   const ext = mimeType.split("/")[1]?.split("+")[0] || (mediaType === "image" ? "jpg" : "mp4");
   return `${path.basename(filePath)}.${ext}`;
+}
+
+async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: StoreMediaMetadata): Promise<void> {
+  if (!env.TELEGRAM_PUBLIC_CHANNEL_ID) return;
+
+  await publicChannelSendLimiter.schedule(() =>
+    telegramBot().api.copyMessage(env.TELEGRAM_PUBLIC_CHANNEL_ID!, storageChatId, storageMessageId, {
+      caption: publicChannelCaption(metadata),
+    }),
+  );
+}
+
+function publicChannelCaption(metadata: StoreMediaMetadata): string {
+  const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
+  const dateTag = hashtag(formatStreamDateTag(metadata.streamStartedAt));
+  const text = stripUrls(metadata.messageText).replace(/\s+/g, " ").trim();
+  const prefix = `${streamerTag} ${dateTag} ${metadata.authorName}:`;
+  return truncate(text ? `${prefix} ${text}` : prefix, 1000);
+}
+
+function hashtag(value: string): string {
+  return `#${value.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+}
+
+function formatStreamDateTag(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(date)
+    .split("-");
+  return parts.join("_");
+}
+
+function stripUrls(text: string): string {
+  return text.replace(/https?:\/\/\S+/gi, "").trim();
+}
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
 }

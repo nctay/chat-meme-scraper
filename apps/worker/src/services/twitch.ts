@@ -17,6 +17,7 @@ let appToken: { value: string; expiresAt: number } | null = null;
 let chatClient: InstanceType<typeof tmi.Client> | null = null;
 let chatConnecting = false;
 let eventSubSocket: WebSocket | null = null;
+const offlineGraceMs = 30 * 60 * 1000;
 
 export async function pollTwitchStreams(): Promise<void> {
   if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || channelLogins().length === 0) return;
@@ -42,13 +43,12 @@ export async function pollTwitchStreams(): Promise<void> {
         where: { login },
         data: { lastStatus: "offline", lastCheckedAt: new Date() },
       });
-      const sessionUpdate = await prisma.streamSession.updateMany({
-        where: { streamer: { login }, status: "live" },
-        data: { status: "ended", endedAt: new Date() },
-      });
+      const sessionUpdate = await markStreamerOffline(login);
       console.log(`[twitch] offline login=${login} streamers=${streamerUpdate.count} sessions=${sessionUpdate.count}`);
     }
   }
+
+  await finalizeExpiredGraceSessions();
 }
 
 export function ensureEventSubConnected(): void {
@@ -161,7 +161,22 @@ async function handleEventSubMessage(raw: string): Promise<void> {
       update: { lastStatus: "online", lastCheckedAt: new Date(), displayName: event.broadcaster_user_name },
     });
     const active = await prisma.streamSession.findFirst({ where: { streamerId: streamer.id, status: "live" } });
-    if (!active) {
+    if (active && (!active.twitchStreamId || active.twitchStreamId === event.id || isWithinOfflineGrace(active.endedAt, event.started_at ? new Date(event.started_at) : new Date()))) {
+      await prisma.streamSession.update({
+        where: { id: active.id },
+        data: {
+          twitchStreamId: active.twitchStreamId ?? event.id,
+          title: event.title,
+          endedAt: null,
+        },
+      });
+    } else {
+      if (active) {
+        await prisma.streamSession.update({
+          where: { id: active.id },
+          data: { status: "ended", endedAt: event.started_at ? new Date(event.started_at) : new Date() },
+        });
+      }
       await prisma.streamSession.create({
         data: {
           streamerId: streamer.id,
@@ -177,10 +192,7 @@ async function handleEventSubMessage(raw: string): Promise<void> {
   if (message.metadata.subscription_type === "stream.offline") {
     console.log(`[eventsub] stream.offline ${login}`);
     await prisma.streamer.updateMany({ where: { login }, data: { lastStatus: "offline", lastCheckedAt: new Date() } });
-    await prisma.streamSession.updateMany({
-      where: { streamer: { login }, status: "live" },
-      data: { status: "ended", endedAt: new Date() },
-    });
+    await markStreamerOffline(login);
   }
 }
 
@@ -228,7 +240,11 @@ export async function ingestChatMessage(input: {
     return;
   }
 
-  const session = await getOrCreateSession(streamer.id, input.streamerLogin, input.postedAt);
+  const session = await getActiveOrGraceSession(streamer.id, input.postedAt);
+  if (!session) {
+    console.log(`[chat] ignored offline media channel=${input.streamerLogin}`);
+    return;
+  }
 
   for (const rawUrl of urls) {
     const normalizedUrl = normalizeUrl(rawUrl);
@@ -330,20 +346,16 @@ function channelLogins(): string[] {
     .filter(Boolean);
 }
 
-async function getOrCreateSession(streamerId: string, _streamerLogin: string, seenAt: Date) {
+async function getActiveOrGraceSession(streamerId: string, seenAt: Date) {
   const active = await prisma.streamSession.findFirst({
-    where: { streamerId, status: "live" },
+    where: {
+      streamerId,
+      status: "live",
+      OR: [{ endedAt: null }, { endedAt: { gte: new Date(seenAt.getTime() - offlineGraceMs) } }],
+    },
     orderBy: { startedAt: "desc" },
   });
-  if (active) return active;
-
-  return prisma.streamSession.create({
-    data: {
-      streamerId,
-      startedAt: seenAt,
-      status: "live",
-    },
-  });
+  return active;
 }
 
 async function upsertLiveStreamer(stream: TwitchStream): Promise<void> {
@@ -369,20 +381,21 @@ async function upsertLiveStreamer(stream: TwitchStream): Promise<void> {
     orderBy: { startedAt: "desc" },
   });
 
-  if (active?.twitchStreamId && active.twitchStreamId !== stream.id) {
+  if (active?.twitchStreamId && active.twitchStreamId !== stream.id && !isWithinOfflineGrace(active.endedAt, new Date(stream.started_at))) {
     await prisma.streamSession.update({
       where: { id: active.id },
       data: { status: "ended", endedAt: new Date(stream.started_at) },
     });
   }
 
-  if (active && (!active.twitchStreamId || active.twitchStreamId === stream.id)) {
+  if (active && (!active.twitchStreamId || active.twitchStreamId === stream.id || isWithinOfflineGrace(active.endedAt, new Date(stream.started_at)))) {
     await prisma.streamSession.update({
       where: { id: active.id },
       data: {
         twitchStreamId: active.twitchStreamId ?? stream.id,
         title: stream.title,
-        startedAt: active.twitchStreamId ? active.startedAt : new Date(stream.started_at),
+        startedAt: active.startedAt,
+        endedAt: null,
       },
     });
     return;
@@ -397,6 +410,26 @@ async function upsertLiveStreamer(stream: TwitchStream): Promise<void> {
       status: "live",
     },
   });
+}
+
+async function markStreamerOffline(login: string) {
+  return prisma.streamSession.updateMany({
+    where: { streamer: { login }, status: "live", endedAt: null },
+    data: { endedAt: new Date() },
+  });
+}
+
+async function finalizeExpiredGraceSessions(): Promise<void> {
+  const cutoff = new Date(Date.now() - offlineGraceMs);
+  const update = await prisma.streamSession.updateMany({
+    where: { status: "live", endedAt: { lt: cutoff } },
+    data: { status: "ended" },
+  });
+  if (update.count > 0) console.log(`[twitch] finalized grace sessions=${update.count}`);
+}
+
+export function isWithinOfflineGrace(endedAt: Date | null, startedAt: Date): boolean {
+  return Boolean(endedAt && startedAt.getTime() - endedAt.getTime() <= offlineGraceMs);
 }
 
 async function getAppToken(): Promise<string> {

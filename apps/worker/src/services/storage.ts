@@ -16,8 +16,12 @@ export type StoreMediaMetadata = {
   normalizedUrl: string;
   sha256: string;
   streamerLogin: string;
+  streamerDisplayName: string;
+  streamStartedAt: Date;
   streamSessionId: string;
   assetId: string;
+  authorName: string;
+  messageText: string;
 };
 
 export async function storeMedia(filePath: string, mimeType: string, mediaType: Extract<MediaType, "image" | "video">, metadata: StoreMediaMetadata): Promise<StoredMedia> {

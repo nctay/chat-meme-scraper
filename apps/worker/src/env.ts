@@ -11,6 +11,7 @@ export const env = z
     TWITCH_CHANNELS: z.string().default(""),
     TELEGRAM_BOT_TOKEN: z.string().optional(),
     TELEGRAM_STORAGE_CHAT_ID: z.string().optional(),
+    TELEGRAM_PUBLIC_CHANNEL_ID: z.string().optional(),
     MAX_IMAGE_BYTES: z.coerce.number().default(30 * 1024 * 1024),
     MAX_VIDEO_BYTES: z.coerce.number().default(150 * 1024 * 1024),
     MAX_DAILY_DOWNLOAD_BYTES: z.coerce.number().default(10 * 1024 * 1024 * 1024),
