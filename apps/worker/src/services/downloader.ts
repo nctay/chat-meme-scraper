@@ -307,14 +307,8 @@ async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
       await fs.promises.rm(tempPath, { force: true }).catch(() => undefined);
       throw error;
     }
-    return {
-      filePath: tempPath,
-      sha256: hash.digest("hex"),
-      byteSize,
-      mimeType,
-      mediaType: finalMediaType,
-      finalUrl: url.toString(),
-    };
+    hash.digest("hex");
+    return finalizeDownload(tempPath, finalMediaType, url.toString(), limit);
   }
 
   throw new Error("Too many redirects");
@@ -345,7 +339,7 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
       "--match-filter",
       `duration <= ${env.MAX_PLATFORM_VIDEO_SECONDS}`,
       "--format",
-      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best[ext=mp4]/best",
+      "bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
       "--merge-output-format",
       "mp4",
       "--output",
@@ -354,25 +348,79 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
     ]);
 
     const downloadedPath = await findDownloadedPlatformFile(tempDir);
-    const ext = getExtension(downloadedPath) ?? "mp4";
-    const finalPath = path.join(os.tmpdir(), `archive-platform-${crypto.randomUUID()}.${ext}`);
-    await fs.promises.rename(downloadedPath, finalPath);
-
-    const result = await inspectDownloadedFile(finalPath, "video");
-    if (result.byteSize > limit) {
-      await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
-      throw new Error(`Platform video exceeded byte limit ${limit}`);
-    }
+    const result = await finalizeDownload(downloadedPath, "video", url.toString(), limit);
     console.log(`[platform] downloaded url=${url.toString()} bytes=${result.byteSize} mime=${result.mimeType}`);
+    return result;
+  } finally {
+    await fs.promises.rm(tempDir, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
+async function finalizeDownload(filePath: string, mediaType: "image" | "video", finalUrl: string, limit: number): Promise<DownloadResult> {
+  let finalPath = filePath;
+
+  try {
+    if (mediaType === "video") {
+      finalPath = path.join(os.tmpdir(), `archive-video-${crypto.randomUUID()}.mp4`);
+      console.log(`[video] transcoding input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
+      await transcodeForTelegram(filePath, finalPath);
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+    }
+
+    const result = await inspectDownloadedFile(finalPath, mediaType);
+    if (result.byteSize > limit) {
+      throw new Error(`Media exceeded byte limit after processing: ${result.byteSize} > ${limit}`);
+    }
 
     return {
       ...result,
       filePath: finalPath,
-      mediaType: "video",
-      finalUrl: url.toString(),
+      mediaType,
+      finalUrl,
     };
-  } finally {
-    await fs.promises.rm(tempDir, { force: true, recursive: true }).catch(() => undefined);
+  } catch (error) {
+    await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
+    if (finalPath !== filePath) await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function transcodeForTelegram(inputPath: string, outputPath: string): Promise<void> {
+  try {
+    await runFfmpeg([
+      "-hide_banner",
+      "-y",
+      "-i",
+      inputPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      "-sn",
+      "-dn",
+      "-vf",
+      "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "28",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "main",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ]);
+  } catch (error) {
+    await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -389,6 +437,39 @@ async function assertPlatformVideoFits(url: string, limit: number): Promise<void
   ) as PlatformMetadata;
 
   assertPlatformMetadataFits(metadata, limit, env.MAX_PLATFORM_VIDEO_SECONDS);
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.PLATFORM_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("ffmpeg", args, {
+        stdio: ["ignore", "ignore", "pipe"],
+        signal: controller.signal,
+      });
+      const stderr: Buffer[] = [];
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr.push(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code, signal) => {
+        const message = Buffer.concat(stderr).toString("utf8").trim();
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`ffmpeg failed${signal ? ` (${signal})` : ""}: ${message || `exit code ${code}`}`));
+      });
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`ffmpeg timed out after ${env.PLATFORM_DOWNLOAD_TIMEOUT_MS}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function runYtDlp(args: string[]): Promise<string> {
