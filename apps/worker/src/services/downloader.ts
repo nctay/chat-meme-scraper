@@ -328,24 +328,25 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
 
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-platform-"));
   const outputTemplate = path.join(tempDir, "%(id)s.%(ext)s");
+  const ytDlpArgs = [
+    "--no-playlist",
+    "--no-progress",
+    "--restrict-filenames",
+    "--max-filesize",
+    String(limit),
+    "--match-filter",
+    `duration <= ${env.MAX_PLATFORM_VIDEO_SECONDS}`,
+    "--format",
+    "bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+    "--merge-output-format",
+    "mp4",
+    "--output",
+    outputTemplate,
+    url.toString(),
+  ];
 
   try {
-    await runYtDlp([
-      "--no-playlist",
-      "--no-progress",
-      "--restrict-filenames",
-      "--max-filesize",
-      String(limit),
-      "--match-filter",
-      `duration <= ${env.MAX_PLATFORM_VIDEO_SECONDS}`,
-      "--format",
-      "bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
-      "--merge-output-format",
-      "mp4",
-      "--output",
-      outputTemplate,
-      url.toString(),
-    ]);
+    await runYtDlp(ytDlpArgs);
 
     const downloadedPath = await findDownloadedPlatformFile(tempDir);
     const result = await finalizeDownload(downloadedPath, "video", url.toString(), limit);
@@ -399,7 +400,7 @@ async function transcodeForTelegram(inputPath: string, outputPath: string): Prom
       "-sn",
       "-dn",
       "-vf",
-      "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+      "scale=trunc((iw*sar)/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",

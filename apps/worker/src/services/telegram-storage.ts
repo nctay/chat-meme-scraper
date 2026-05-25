@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { Bot, InputFile } from "grammy";
 import type { Message } from "grammy/types";
-import { env } from "../env.js";
+import { env, privateStreamerLogins } from "../env.js";
 import type { StoreMediaMetadata, StoredMedia } from "./storage.js";
 import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
@@ -28,6 +29,7 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   ].join("\n");
 
   const input = new InputFile(fs.createReadStream(filePath), fileName(filePath, mimeType, mediaType));
+  const videoMetadata = mediaType === "video" ? await readVideoMetadata(filePath) : {};
   const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage | Message.AnimationMessage>(async () => {
     if (isGif(mimeType)) {
       return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
@@ -35,7 +37,7 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
     if (mediaType === "image") {
       return telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
     }
-    return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, supports_streaming: true });
+    return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, supports_streaming: true, ...videoMetadata });
   });
   const file = "photo" in message ? message.photo.at(-1) : "video" in message ? message.video : message.animation;
   if (!file) throw new Error("Telegram did not return stored file metadata");
@@ -65,8 +67,62 @@ function isGif(mimeType: string): boolean {
   return mimeType.split(";")[0]?.trim().toLowerCase() === "image/gif";
 }
 
+async function readVideoMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number }> {
+  try {
+    const output = await runFfprobe([
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height:format=duration",
+      "-of",
+      "json",
+      filePath,
+    ]);
+    const parsed = JSON.parse(output) as { streams?: Array<{ width?: number; height?: number }>; format?: { duration?: string } };
+    const stream = parsed.streams?.[0];
+    const duration = Number(parsed.format?.duration);
+    return {
+      width: positiveInteger(stream?.width),
+      height: positiveInteger(stream?.height),
+      duration: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+    };
+  } catch (error) {
+    console.warn("[telegram] ffprobe video metadata failed", error);
+    return {};
+  }
+}
+
+async function runFfprobe(args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString("utf8"));
+        return;
+      }
+      reject(new Error(Buffer.concat(stderr).toString("utf8").trim() || `ffprobe exit code ${code}`));
+    });
+  });
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: StoreMediaMetadata): Promise<void> {
   if (!env.TELEGRAM_PUBLIC_CHANNEL_ID) return;
+  if (privateStreamerLogins.has(metadata.streamerLogin.toLowerCase())) {
+    console.log(`[telegram] skip public channel private_streamer=${metadata.streamerLogin}`);
+    return;
+  }
 
   await publicChannelSendLimiter.schedule(() =>
     telegramBot().api.copyMessage(env.TELEGRAM_PUBLIC_CHANNEL_ID!, storageChatId, storageMessageId, {

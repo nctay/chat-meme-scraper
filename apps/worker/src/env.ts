@@ -12,6 +12,7 @@ export const env = z
     TELEGRAM_BOT_TOKEN: z.string().optional(),
     TELEGRAM_STORAGE_CHAT_ID: z.string().optional(),
     TELEGRAM_PUBLIC_CHANNEL_ID: z.string().optional(),
+    TELEGRAM_PRIVATE_STREAMER_LOGINS: z.string().default(""),
     MAX_IMAGE_BYTES: z.coerce.number().default(30 * 1024 * 1024),
     MAX_VIDEO_BYTES: z.coerce.number().default(150 * 1024 * 1024),
     MAX_DAILY_DOWNLOAD_BYTES: z.coerce.number().default(10 * 1024 * 1024 * 1024),
@@ -26,3 +27,9 @@ export const env = z
 export const twitchChannels = env.TWITCH_CHANNELS.split(",")
   .map((channel) => channel.trim().toLowerCase().replace(/^#/, ""))
   .filter(Boolean);
+
+export const privateStreamerLogins = new Set(
+  env.TELEGRAM_PRIVATE_STREAMER_LOGINS.split(",")
+    .map((login) => login.trim().toLowerCase())
+    .filter(Boolean),
+);
