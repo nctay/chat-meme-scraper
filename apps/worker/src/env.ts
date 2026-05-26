@@ -20,7 +20,7 @@ export const env = z
     ALLOW_PRIVATE_MEDIA_HOSTS: z.coerce.boolean().default(false),
     ENABLE_PLATFORM_DOWNLOADS: z.coerce.boolean().default(false),
     MAX_PLATFORM_VIDEO_SECONDS: z.coerce.number().default(300),
-    PLATFORM_DOWNLOAD_TIMEOUT_MS: z.coerce.number().default(120_000),
+    PLATFORM_DOWNLOAD_TIMEOUT_MS: z.coerce.number().default(600_000),
   })
   .parse(process.env);
 
