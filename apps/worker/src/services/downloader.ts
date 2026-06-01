@@ -308,7 +308,7 @@ async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
       throw error;
     }
     hash.digest("hex");
-    return finalizeDownload(tempPath, finalMediaType, url.toString(), limit);
+    return finalizeDownload(tempPath, finalMediaType, url.toString(), limit, mimeType);
   }
 
   throw new Error("Too many redirects");
@@ -357,7 +357,7 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
   }
 }
 
-async function finalizeDownload(filePath: string, mediaType: "image" | "video", finalUrl: string, limit: number): Promise<DownloadResult> {
+async function finalizeDownload(filePath: string, mediaType: "image" | "video", finalUrl: string, limit: number, originalMimeType?: string): Promise<DownloadResult> {
   let finalPath = filePath;
 
   try {
@@ -375,6 +375,7 @@ async function finalizeDownload(filePath: string, mediaType: "image" | "video", 
 
     return {
       ...result,
+      mimeType: mediaType === "image" && originalMimeType ? originalMimeType : result.mimeType,
       filePath: finalPath,
       mediaType,
       finalUrl,
