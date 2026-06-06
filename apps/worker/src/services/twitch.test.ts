@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isWithinOfflineGrace } from "./stream-grace.js";
+import { isIgnoredChatCommand } from "./twitch.js";
 
 describe("twitch stream session grace", () => {
   it("keeps reconnects within thirty minutes in the same session", () => {
@@ -12,5 +13,17 @@ describe("twitch stream session grace", () => {
 
   it("does not treat never-ended sessions as grace reconnects", () => {
     expect(isWithinOfflineGrace(null, new Date("2026-05-24T10:00:00Z"))).toBe(false);
+  });
+});
+
+describe("twitch chat command filtering", () => {
+  it("ignores song request commands", () => {
+    expect(isIgnoredChatCommand("!sr https://youtu.be/abc")).toBe(true);
+    expect(isIgnoredChatCommand("  !SR")).toBe(true);
+  });
+
+  it("does not ignore regular messages that merely mention the command", () => {
+    expect(isIgnoredChatCommand("look at this https://example.com/a.jpg !sr")).toBe(false);
+    expect(isIgnoredChatCommand("!sra https://example.com/a.jpg")).toBe(false);
   });
 });

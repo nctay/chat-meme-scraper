@@ -231,6 +231,11 @@ export async function ingestChatMessage(input: {
   messageText: string;
   postedAt: Date;
 }): Promise<void> {
+  if (isIgnoredChatCommand(input.messageText)) {
+    console.log(`[chat] ignored command channel=${input.streamerLogin} author=${input.authorName}`);
+    return;
+  }
+
   const urls = extractUrls(input.messageText).filter(isSupportedMediaUrl);
   if (urls.length === 0) return;
 
@@ -326,6 +331,10 @@ export async function ingestChatMessage(input: {
       console.log(`[download] queued chatPost=${post.id} asset=${asset.id}`);
     }
   }
+}
+
+export function isIgnoredChatCommand(messageText: string): boolean {
+  return /^!sr(?:\s|$)/i.test(messageText.trim());
 }
 
 async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {
