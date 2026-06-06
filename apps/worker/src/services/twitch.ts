@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
+import { isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
 
 type TwitchStream = {
@@ -331,10 +332,6 @@ export async function ingestChatMessage(input: {
       console.log(`[download] queued chatPost=${post.id} asset=${asset.id}`);
     }
   }
-}
-
-export function isIgnoredChatCommand(messageText: string): boolean {
-  return /^!sr(?:\s|$)/i.test(messageText.trim());
 }
 
 async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {

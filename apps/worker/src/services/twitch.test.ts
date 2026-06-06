@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace } from "./stream-grace.js";
-import { isIgnoredChatCommand } from "./twitch.js";
 
 describe("twitch stream session grace", () => {
   it("keeps reconnects within thirty minutes in the same session", () => {
