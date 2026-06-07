@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
-import { isIgnoredChatCommand } from "./chat-filter.js";
+import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
 
 type TwitchStream = {
@@ -232,6 +232,11 @@ export async function ingestChatMessage(input: {
   messageText: string;
   postedAt: Date;
 }): Promise<void> {
+  if (isIgnoredChatAuthor(input.authorName)) {
+    console.log(`[chat] ignored author channel=${input.streamerLogin} author=${input.authorName}`);
+    return;
+  }
+
   if (isIgnoredChatCommand(input.messageText)) {
     console.log(`[chat] ignored command channel=${input.streamerLogin} author=${input.authorName}`);
     return;

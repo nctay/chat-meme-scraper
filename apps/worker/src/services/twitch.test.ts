@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isIgnoredChatCommand } from "./chat-filter.js";
+import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace } from "./stream-grace.js";
 
 describe("twitch stream session grace", () => {
@@ -25,5 +25,11 @@ describe("twitch chat command filtering", () => {
   it("does not ignore regular messages that merely mention the command", () => {
     expect(isIgnoredChatCommand("look at this https://example.com/a.jpg !sr")).toBe(false);
     expect(isIgnoredChatCommand("!sra https://example.com/a.jpg")).toBe(false);
+  });
+
+  it("ignores Nightbot messages", () => {
+    expect(isIgnoredChatAuthor("Nightbot")).toBe(true);
+    expect(isIgnoredChatAuthor(" nightbot ")).toBe(true);
+    expect(isIgnoredChatAuthor("RealViewer")).toBe(false);
   });
 });
