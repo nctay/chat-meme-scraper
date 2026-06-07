@@ -27,9 +27,11 @@ describe("twitch chat command filtering", () => {
     expect(isIgnoredChatCommand("!sra https://example.com/a.jpg")).toBe(false);
   });
 
-  it("ignores Nightbot messages", () => {
+  it("ignores known bot messages", () => {
     expect(isIgnoredChatAuthor("Nightbot")).toBe(true);
     expect(isIgnoredChatAuthor(" nightbot ")).toBe(true);
+    expect(isIgnoredChatAuthor("StreamElements")).toBe(true);
+    expect(isIgnoredChatAuthor(" streamelements ")).toBe(true);
     expect(isIgnoredChatAuthor("RealViewer")).toBe(false);
   });
 });
