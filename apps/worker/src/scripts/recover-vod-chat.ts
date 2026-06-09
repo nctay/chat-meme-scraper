@@ -6,13 +6,14 @@ import { isIgnoredChatAuthor, isIgnoredChatCommand } from "../services/chat-filt
 
 const TWITCH_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 const PAGE_SIZE = 100;
-const QUERY = `query VideoCommentsByOffsetOrCursor($videoID: ID!, $contentOffsetSeconds: Int, $cursor: Cursor) {
+const PAGE_STEP_SECONDS = Number(process.env.RECOVERY_PAGE_STEP_SECONDS ?? 30);
+const QUERY = `query VideoCommentsByOffsetOrCursor($videoID: ID!, $contentOffsetSeconds: Int) {
   video(id: $videoID) {
     id
     owner { id login displayName }
     createdAt
     title
-    comments(first: ${PAGE_SIZE}, after: $cursor, contentOffsetSeconds: $contentOffsetSeconds) {
+    comments(first: ${PAGE_SIZE}, contentOffsetSeconds: $contentOffsetSeconds) {
       edges {
         cursor
         node {
@@ -70,6 +71,8 @@ const stats: Stats = {
   duplicatePending: 0,
   queued: 0,
 };
+const seenCommentIds = new Set<string>();
+const seenMediaKeys = new Set<string>();
 
 const videoId = requiredEnv("RECOVERY_VOD_ID", process.env.RECOVERY_VOD_ID ?? process.env.VOD_ID);
 const from = parseDateEnv("RECOVERY_FROM", process.env.RECOVERY_FROM);
@@ -88,6 +91,7 @@ async function main(): Promise<void> {
   const firstPage = await fetchCommentsPage({ videoId, contentOffsetSeconds: 0 });
   const videoCreatedAt = new Date(firstPage.createdAt);
   const startOffset = Math.max(0, Math.floor((from.getTime() - videoCreatedAt.getTime()) / 1000) - 120);
+  const endOffset = Math.floor((to.getTime() - videoCreatedAt.getTime()) / 1000) + 120;
 
   const page = await fetchCommentsPage({ videoId, contentOffsetSeconds: startOffset });
   const video = { ...page, comments: page.comments };
@@ -109,20 +113,15 @@ async function main(): Promise<void> {
   const session = await findOrCreateSession(streamer.id, video.title ?? null, videoCreatedAt);
 
   console.log(
-    `[recovery] vod=${videoId} streamer=${streamerLogin} window=${from.toISOString()}..${to.toISOString()} startOffset=${startOffset} dryRun=${dryRun}`,
+    `[recovery] vod=${videoId} streamer=${streamerLogin} window=${from.toISOString()}..${to.toISOString()} offsets=${startOffset}..${endOffset} step=${PAGE_STEP_SECONDS} dryRun=${dryRun}`,
   );
 
-  await processPage(video, session.id);
+  if (PAGE_STEP_SECONDS <= 0) throw new Error("RECOVERY_PAGE_STEP_SECONDS must be positive");
 
-  let cursor = video.comments.edges.at(-1)?.cursor;
-  let hasNextPage = video.comments.pageInfo.hasNextPage;
-  while (hasNextPage && cursor) {
-    const next = await fetchCommentsPage({ videoId, contentOffsetSeconds: startOffset, cursor });
+  await processPage(video, session.id);
+  for (let offset = startOffset + PAGE_STEP_SECONDS; offset <= endOffset; offset += PAGE_STEP_SECONDS) {
+    const next = await fetchCommentsPage({ videoId, contentOffsetSeconds: offset });
     await processPage(next, session.id);
-    const last = next.comments.edges.at(-1)?.node;
-    if (!last || new Date(last.createdAt) > new Date(to.getTime() + 5 * 60 * 1000)) break;
-    cursor = next.comments.edges.at(-1)?.cursor;
-    hasNextPage = next.comments.pageInfo.hasNextPage;
   }
 
   console.log(`[recovery] done ${JSON.stringify(stats)}`);
@@ -155,6 +154,8 @@ async function processPage(video: TwitchVideo, sessionId: string): Promise<void>
     const comment = edge.node;
     const postedAt = new Date(comment.createdAt);
     if (postedAt < from || postedAt > to) continue;
+    if (seenCommentIds.has(comment.id)) continue;
+    seenCommentIds.add(comment.id);
     stats.comments += 1;
 
     const authorName = comment.commenter?.displayName ?? comment.commenter?.login ?? "unknown";
@@ -172,6 +173,9 @@ async function processPage(video: TwitchVideo, sessionId: string): Promise<void>
     for (const rawUrl of urls) {
       const normalizedUrl = normalizeUrl(rawUrl);
       if (!normalizedUrl) continue;
+      const mediaKey = `${comment.id}:${normalizedUrl}`;
+      if (seenMediaKeys.has(mediaKey)) continue;
+      seenMediaKeys.add(mediaKey);
       stats.mediaUrls += 1;
       await recoverMediaUrl({
         sessionId,
@@ -313,7 +317,7 @@ async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {
   return post?.asset ?? null;
 }
 
-async function fetchCommentsPage(input: { videoId: string; contentOffsetSeconds: number; cursor?: string }): Promise<TwitchVideo> {
+async function fetchCommentsPage(input: { videoId: string; contentOffsetSeconds: number }): Promise<TwitchVideo> {
   const response = await fetch("https://gql.twitch.tv/gql", {
     method: "POST",
     headers: {
@@ -326,7 +330,6 @@ async function fetchCommentsPage(input: { videoId: string; contentOffsetSeconds:
         variables: {
           videoID: input.videoId,
           contentOffsetSeconds: input.contentOffsetSeconds,
-          cursor: input.cursor,
         },
         query: QUERY,
       },
