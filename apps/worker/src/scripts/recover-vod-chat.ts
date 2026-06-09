@@ -317,7 +317,7 @@ async function fetchCommentsPage(input: { videoId: string; contentOffsetSeconds:
   const response = await fetch("https://gql.twitch.tv/gql", {
     method: "POST",
     headers: {
-      "Client-ID": env.TWITCH_CLIENT_ID || TWITCH_WEB_CLIENT_ID,
+      "Client-ID": TWITCH_WEB_CLIENT_ID,
       "Content-Type": "application/json",
     },
     body: JSON.stringify([
