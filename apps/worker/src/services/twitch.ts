@@ -2,9 +2,10 @@ import tmi from "tmi.js";
 import WebSocket from "ws";
 import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
-import { env } from "../env.js";
+import { env, privateStreamerLogins } from "../env.js";
 import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
+import { publishDeletedChatMessage } from "./telegram-storage.js";
 
 type TwitchStream = {
   id: string;
@@ -15,10 +16,33 @@ type TwitchStream = {
   started_at: string;
 };
 
+type EventSubMessage = {
+  metadata: { message_type: string; subscription_type?: string; message_timestamp?: string };
+  payload: {
+    session?: { id: string };
+    event?: EventSubEvent;
+  };
+};
+
+type EventSubEvent = {
+  broadcaster_user_id: string;
+  broadcaster_user_login: string;
+  broadcaster_user_name: string;
+  target_user_id?: string;
+  target_user_login?: string;
+  target_user_name?: string;
+  message_id?: string;
+  id?: string;
+  title?: string;
+  started_at?: string;
+};
+
 let appToken: { value: string; expiresAt: number } | null = null;
 let chatClient: InstanceType<typeof tmi.Client> | null = null;
 let chatConnecting = false;
 let eventSubSocket: WebSocket | null = null;
+let lastChatMessageCleanupAt = 0;
+const chatMessageCleanupIntervalMs = 5 * 60 * 1000;
 
 export async function pollTwitchStreams(): Promise<void> {
   if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || channelLogins().length === 0) return;
@@ -94,6 +118,17 @@ export async function ensureChatConnected(): Promise<void> {
     }
 
     try {
+      await recordChatMessage({
+        streamerLogin: login,
+        twitchMessageId: tags.id,
+        authorTwitchId: tags["user-id"],
+        authorLogin: tags.username,
+        authorName,
+        messageText: message,
+        postedAt: new Date(),
+      }).catch((error) => {
+        console.error("Failed to record chat message", error);
+      });
       await ingestChatMessage({
         streamerLogin: login,
         twitchMessageId: tags.id,
@@ -129,14 +164,8 @@ export async function ensureChatConnected(): Promise<void> {
   }
 }
 
-async function handleEventSubMessage(raw: string): Promise<void> {
-  const message = JSON.parse(raw) as {
-    metadata: { message_type: string; subscription_type?: string };
-    payload: {
-      session?: { id: string };
-      event?: { broadcaster_user_id: string; broadcaster_user_login: string; broadcaster_user_name: string; id?: string; title?: string; started_at?: string };
-    };
-  };
+export async function handleEventSubMessage(raw: string): Promise<void> {
+  const message = JSON.parse(raw) as EventSubMessage;
 
   if (message.metadata.message_type === "session_welcome" && message.payload.session?.id) {
     console.log("[eventsub] session welcome");
@@ -195,33 +224,210 @@ async function handleEventSubMessage(raw: string): Promise<void> {
     await prisma.streamer.updateMany({ where: { login }, data: { lastStatus: "offline", lastCheckedAt: new Date() } });
     await markStreamerOffline(login);
   }
+
+  if (message.metadata.subscription_type === "channel.chat.message_delete") {
+    await handleChatMessageDeleteEvent(event, parseEventSubTimestamp(message.metadata.message_timestamp));
+  }
 }
 
 async function subscribeEventSub(sessionId: string): Promise<void> {
   const token = env.TWITCH_EVENTSUB_USER_TOKEN || (await getAppToken());
   const streamers = await prisma.streamer.findMany({ where: { enabled: true, login: { in: channelLogins() } } });
-  const responses = await Promise.all(
-    streamers.flatMap((streamer) =>
-      ["stream.online", "stream.offline"].map((type) =>
-        fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
-          method: "POST",
-          headers: {
-            "Client-ID": env.TWITCH_CLIENT_ID ?? "",
-            Authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            type,
-            version: "1",
-            condition: { broadcaster_user_id: streamer.twitchUserId },
-            transport: { method: "websocket", session_id: sessionId },
-          }),
+  const specs = streamers.flatMap((streamer) => eventSubSubscriptionSpecs(streamer.twitchUserId));
+  const results = await Promise.all(
+    specs.map(async (spec) => {
+      const response = await fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
+        method: "POST",
+        headers: {
+          "Client-ID": env.TWITCH_CLIENT_ID ?? "",
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...spec,
+          transport: { method: "websocket", session_id: sessionId },
         }),
-      ),
-    ),
+      });
+      return { response, spec, body: response.ok ? "" : await response.text() };
+    }),
   );
-  const failed = responses.filter((response) => !response.ok);
-  console.log(`[eventsub] subscriptions requested=${responses.length} failed=${failed.length}`);
+  const failed = results.filter((result) => !result.response.ok);
+  for (const result of failed) {
+    console.warn(`[eventsub] subscribe failed type=${result.spec.type} status=${result.response.status} body=${result.body}`);
+  }
+  console.log(`[eventsub] subscriptions requested=${results.length} failed=${failed.length}`);
+}
+
+export function eventSubSubscriptionSpecs(broadcasterUserId: string): Array<{ type: string; version: string; condition: Record<string, string> }> {
+  const specs: Array<{ type: string; version: string; condition: Record<string, string> }> = ["stream.online", "stream.offline"].map((type) => ({
+    type,
+    version: "1",
+    condition: { broadcaster_user_id: broadcasterUserId },
+  }));
+
+  if (env.TELEGRAM_DELETED_CHANNEL_ID && env.TWITCH_EVENTSUB_USER_TOKEN && env.TWITCH_EVENTSUB_USER_ID) {
+    specs.push({
+      type: "channel.chat.message_delete",
+      version: "1",
+      condition: {
+        broadcaster_user_id: broadcasterUserId,
+        user_id: env.TWITCH_EVENTSUB_USER_ID,
+      },
+    });
+  }
+
+  return specs;
+}
+
+async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Date): Promise<void> {
+  if (!event.message_id) return;
+  if (!env.TELEGRAM_DELETED_CHANNEL_ID) return;
+
+  const login = event.broadcaster_user_login.toLowerCase();
+  if (privateStreamerLogins.has(login)) {
+    console.log(`[eventsub] skip deleted message private_streamer=${login}`);
+    return;
+  }
+
+  const streamer = await prisma.streamer.findUnique({ where: { login } });
+  if (!streamer) {
+    console.warn(`[eventsub] deleted message ignored unknown-streamer login=${login}`);
+    return;
+  }
+
+  const session = await getActiveOrGraceSession(streamer.id, deletedAt);
+  if (!session) {
+    console.log(`[eventsub] deleted message ignored offline channel=${login}`);
+    return;
+  }
+
+  const twitchMessageId = event.message_id;
+  const existing = await prisma.deletedChatMessage.findUnique({
+    where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
+  });
+  if (existing?.telegramMessageId) {
+    console.log(`[eventsub] deleted message duplicate channel=${login} message=${twitchMessageId}`);
+    return;
+  }
+  const storedMessage = await prisma.twitchChatMessage.findUnique({
+    where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
+  });
+  const messageText = storedMessage?.messageText ?? "[message text unavailable]";
+  const authorTwitchId = storedMessage?.authorTwitchId ?? event.target_user_id;
+  const authorLogin = storedMessage?.authorLogin ?? event.target_user_login;
+  const authorName = storedMessage?.authorName ?? event.target_user_name ?? event.target_user_login ?? "unknown";
+
+  let canPublish = false;
+  if (existing) {
+    canPublish = existing.updatedAt.getTime() < Date.now() - 5 * 60 * 1000;
+    if (!canPublish) {
+      console.log(`[eventsub] deleted message publish already pending channel=${login} message=${twitchMessageId}`);
+      return;
+    }
+  } else {
+    try {
+      await prisma.deletedChatMessage.create({
+        data: {
+          streamerId: streamer.id,
+          streamSessionId: session.id,
+          twitchMessageId,
+          authorTwitchId,
+          authorLogin,
+          authorName,
+          messageText,
+          deletedAt,
+        },
+      });
+      canPublish = true;
+    } catch (error) {
+      const duplicate = await prisma.deletedChatMessage.findUnique({
+        where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
+      });
+      if (duplicate) return;
+      throw error;
+    }
+  }
+
+  if (!canPublish) return;
+
+  const linkedPosts = await findPostsForRawTwitchMessage(session.id, twitchMessageId);
+  const published = await publishDeletedChatMessage({
+    streamerLogin: streamer.login,
+    streamStartedAt: session.startedAt,
+    authorName,
+    authorLogin,
+    messageText,
+    twitchMessageId,
+    linkedPosts,
+  });
+
+  await prisma.deletedChatMessage.update({
+    where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
+    data: {
+      streamerId: streamer.id,
+      streamSessionId: session.id,
+      twitchMessageId,
+      authorTwitchId,
+      authorLogin,
+      authorName,
+      messageText,
+      deletedAt,
+      telegramChatId: published?.telegramChatId,
+      telegramMessageId: published?.telegramMessageId,
+    },
+  });
+}
+
+export async function recordChatMessage(input: {
+  streamerLogin: string;
+  twitchMessageId?: string;
+  authorTwitchId?: string;
+  authorLogin?: string;
+  authorName: string;
+  messageText: string;
+  postedAt: Date;
+}): Promise<void> {
+  if (!input.twitchMessageId) return;
+  if (isIgnoredChatAuthor(input.authorName) || isIgnoredChatCommand(input.messageText)) return;
+
+  const streamer = await prisma.streamer.findUnique({ where: { login: input.streamerLogin } });
+  if (!streamer) return;
+
+  const session = await getActiveOrGraceSession(streamer.id, input.postedAt);
+  if (!session) return;
+
+  await prisma.twitchChatMessage.upsert({
+    where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId: input.twitchMessageId } },
+    create: {
+      streamerId: streamer.id,
+      streamSessionId: session.id,
+      twitchMessageId: input.twitchMessageId,
+      authorTwitchId: input.authorTwitchId,
+      authorLogin: input.authorLogin,
+      authorName: input.authorName,
+      messageText: input.messageText,
+      postedAt: input.postedAt,
+    },
+    update: {
+      streamSessionId: session.id,
+      authorTwitchId: input.authorTwitchId,
+      authorLogin: input.authorLogin,
+      authorName: input.authorName,
+      messageText: input.messageText,
+      postedAt: input.postedAt,
+    },
+  });
+}
+
+export async function cleanupExpiredChatMessages(now = new Date()): Promise<number> {
+  const retentionMinutes = Math.max(1, env.TWITCH_CHAT_MESSAGE_RETENTION_MINUTES);
+  if (Date.now() - lastChatMessageCleanupAt < chatMessageCleanupIntervalMs) return 0;
+  lastChatMessageCleanupAt = Date.now();
+
+  const cutoff = new Date(now.getTime() - retentionMinutes * 60 * 1000);
+  const result = await prisma.twitchChatMessage.deleteMany({ where: { postedAt: { lt: cutoff } } });
+  if (result.count > 0) console.log(`[chat] cleaned expired messages count=${result.count} cutoff=${cutoff.toISOString()}`);
+  return result.count;
 }
 
 export async function ingestChatMessage(input: {
@@ -268,6 +474,7 @@ export async function ingestChatMessage(input: {
         data: {
           streamSessionId: session.id,
           twitchMessageId: input.twitchMessageId ? `${input.twitchMessageId}:${normalizedUrl}` : undefined,
+          rawTwitchMessageId: input.twitchMessageId,
           authorTwitchId: input.authorTwitchId,
           authorName: input.authorName,
           messageText: input.messageText,
@@ -286,6 +493,7 @@ export async function ingestChatMessage(input: {
       data: {
         streamSessionId: session.id,
         twitchMessageId: input.twitchMessageId ? `${input.twitchMessageId}:${normalizedUrl}` : undefined,
+        rawTwitchMessageId: input.twitchMessageId,
         authorTwitchId: input.authorTwitchId,
         authorName: input.authorName,
         messageText: input.messageText,
@@ -350,6 +558,23 @@ async function findStoredAssetForNormalizedUrl(normalizedUrl: string) {
     include: { asset: true },
   });
   return post?.asset ?? null;
+}
+
+async function findPostsForRawTwitchMessage(streamSessionId: string, twitchMessageId: string) {
+  return prisma.chatPost.findMany({
+    where: {
+      streamSessionId,
+      OR: [{ rawTwitchMessageId: twitchMessageId }, { twitchMessageId: { startsWith: `${twitchMessageId}:` } }],
+    },
+    orderBy: { postedAt: "asc" },
+    include: { asset: true },
+  });
+}
+
+function parseEventSubTimestamp(value: string | undefined): Date {
+  if (!value) return new Date();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
 async function syncConfiguredStreamers(token: string): Promise<void> {

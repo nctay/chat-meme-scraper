@@ -10,6 +10,7 @@ import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 let bot: Bot | null = null;
 const storageSendLimiter = new SerialRateLimiter(1100);
 const publicChannelSendLimiter = new SerialRateLimiter(1100);
+const deletedChannelSendLimiter = new SerialRateLimiter(1100);
 
 function telegramBot(): Bot {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -134,6 +135,49 @@ async function publishTelegramMedia(storageChatId: number | string, storageMessa
   );
 }
 
+export type DeletedChatMessageMetadata = {
+  streamerLogin: string;
+  streamStartedAt: Date;
+  authorName: string;
+  authorLogin?: string | null;
+  messageText: string;
+  twitchMessageId: string;
+  linkedPosts: Array<{
+    normalizedUrl: string;
+    assetId: string | null;
+    asset: {
+      status: string;
+      telegramChatId: string | null;
+      telegramMessageId: number | null;
+    } | null;
+  }>;
+};
+
+export async function publishDeletedChatMessage(metadata: DeletedChatMessageMetadata): Promise<{ telegramChatId: string; telegramMessageId: number } | null> {
+  if (!env.TELEGRAM_DELETED_CHANNEL_ID) return null;
+
+  const copyablePosts = metadata.linkedPosts.filter((post) => post.asset?.status === "stored" && post.asset.telegramChatId && post.asset.telegramMessageId);
+  let firstMessageId: number | null = null;
+
+  for (const post of copyablePosts) {
+    const copied = await deletedChannelSendLimiter.schedule(() =>
+      telegramBot().api.copyMessage(env.TELEGRAM_DELETED_CHANNEL_ID!, post.asset!.telegramChatId!, post.asset!.telegramMessageId!, {
+        caption: deletedChannelCaption(metadata, post),
+      }),
+    );
+    firstMessageId ??= copied.message_id;
+  }
+
+  if (firstMessageId) {
+    return { telegramChatId: env.TELEGRAM_DELETED_CHANNEL_ID, telegramMessageId: firstMessageId };
+  }
+
+  const sent = await deletedChannelSendLimiter.schedule(() =>
+    telegramBot().api.sendMessage(env.TELEGRAM_DELETED_CHANNEL_ID!, deletedChannelCaption(metadata)),
+  );
+  return { telegramChatId: String(sent.chat.id), telegramMessageId: sent.message_id };
+}
+
 function publicChannelCaption(metadata: StoreMediaMetadata): string {
   const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
   const dateTag = hashtag(`date_${formatStreamDateTag(metadata.streamStartedAt)}`);
@@ -141,6 +185,14 @@ function publicChannelCaption(metadata: StoreMediaMetadata): string {
   const text = stripUrls(metadata.messageText).replace(/\s+/g, " ").trim();
   const prefix = `${streamerTag} ${dateTag} ${senderTag}`;
   return truncate(text ? `${prefix}: ${text}` : prefix, 1000);
+}
+
+function deletedChannelCaption(metadata: DeletedChatMessageMetadata, linkedPost?: DeletedChatMessageMetadata["linkedPosts"][number]): string {
+  const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
+  const dateTag = hashtag(`date_${formatStreamDateTag(metadata.streamStartedAt)}`);
+  const senderTag = hashtag(`user_${metadata.authorLogin || metadata.authorName}`);
+  const linked = linkedPost ? `\nasset=${linkedPost.assetId ?? "none"}\nurl=${linkedPost.normalizedUrl}` : "";
+  return truncate(`${streamerTag} ${dateTag} ${senderTag}: ${metadata.messageText}${linked}`, linkedPost ? 1000 : 3900);
 }
 
 function hashtag(value: string): string {

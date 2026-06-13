@@ -27,15 +27,18 @@ DATABASE_URL="postgresql://archive:archive@postgres:5432/archive?schema=public"
 TWITCH_CLIENT_ID=""
 TWITCH_CLIENT_SECRET=""
 TWITCH_EVENTSUB_USER_TOKEN=""
+TWITCH_EVENTSUB_USER_ID=""
 TWITCH_BOT_USERNAME=""
 TWITCH_BOT_OAUTH="oauth:"
 TWITCH_CHANNELS="streamer_login"
 
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_STORAGE_CHAT_ID="-100..."
+TELEGRAM_DELETED_CHANNEL_ID="-100..."
 TELEGRAM_ALLOWED_USER_IDS="123456789"
 TELEGRAM_PUBLIC_BOT_TOKEN=""
 
+TWITCH_CHAT_MESSAGE_RETENTION_MINUTES="120"
 MAX_IMAGE_BYTES="31457280"
 MAX_VIDEO_BYTES="157286400"
 MAX_DAILY_DOWNLOAD_BYTES="10737418240"
@@ -44,6 +47,9 @@ ALLOW_PRIVATE_MEDIA_HOSTS="false"
 ```
 
 Админского и публичного Telegram-ботов добавь в приватный storage-канал, чтобы оба могли делать `copyMessage`.
+
+Для канала удаленных сообщений `TWITCH_EVENTSUB_USER_TOKEN` должен иметь `user:read:chat`, а `TWITCH_EVENTSUB_USER_ID` — Twitch user id этого же чат-аккаунта/бота. Модераторские права не нужны, но Twitch не отдаст имя модератора, который удалил сообщение.
+Буфер обычных chat-сообщений хранится только `TWITCH_CHAT_MESSAGE_RETENTION_MINUTES`, по умолчанию 120 минут. Архив удаленных сообщений остается в БД.
 
 ## VPS Deploy
 

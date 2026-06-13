@@ -1,6 +1,96 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
 import { isWithinOfflineGrace } from "./stream-grace.js";
+
+const envMock = vi.hoisted(() => ({
+  DATABASE_URL: "postgresql://test/test",
+  TWITCH_CLIENT_ID: "client",
+  TWITCH_CLIENT_SECRET: "secret",
+  TWITCH_EVENTSUB_USER_TOKEN: "user-token",
+  TWITCH_EVENTSUB_USER_ID: "9001",
+  TWITCH_BOT_USERNAME: "bot",
+  TWITCH_BOT_OAUTH: "oauth:test",
+  TWITCH_CHANNELS: "streamer",
+  TELEGRAM_BOT_TOKEN: "telegram-token",
+  TELEGRAM_STORAGE_CHAT_ID: "-100storage",
+  TELEGRAM_PUBLIC_CHANNEL_ID: undefined as string | undefined,
+  TELEGRAM_DELETED_CHANNEL_ID: "-100deleted" as string | undefined,
+  TELEGRAM_PRIVATE_STREAMER_LOGINS: "",
+  TWITCH_CHAT_MESSAGE_RETENTION_MINUTES: 120,
+  MAX_IMAGE_BYTES: 10,
+  MAX_VIDEO_BYTES: 10,
+  MAX_DAILY_DOWNLOAD_BYTES: 10,
+  MAX_PARALLEL_DOWNLOADS: 1,
+  ALLOW_PRIVATE_MEDIA_HOSTS: false,
+  ENABLE_PLATFORM_DOWNLOADS: false,
+  MAX_PLATFORM_VIDEO_SECONDS: 300,
+  PLATFORM_DOWNLOAD_TIMEOUT_MS: 1000,
+}));
+
+const privateStreamerLoginsMock = vi.hoisted(() => new Set<string>());
+const publishDeletedChatMessageMock = vi.hoisted(() => vi.fn());
+const prismaMock = vi.hoisted(() => ({
+  streamer: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+    updateMany: vi.fn(),
+  },
+  streamSession: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+    create: vi.fn(),
+  },
+  deletedChatMessage: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  twitchChatMessage: {
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  chatPost: {
+    findMany: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    findFirst: vi.fn(),
+  },
+  blockedMedia: {
+    findUnique: vi.fn(),
+  },
+  asset: {
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+  },
+  downloadJob: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+  },
+}));
+
+vi.mock("../env.js", () => ({
+  env: envMock,
+  privateStreamerLogins: privateStreamerLoginsMock,
+}));
+
+vi.mock("../prisma.js", () => ({
+  prisma: prismaMock,
+}));
+
+vi.mock("./telegram-storage.js", () => ({
+  publishDeletedChatMessage: publishDeletedChatMessageMock,
+}));
+
+vi.mock("tmi.js", () => ({
+  default: { Client: class {} },
+}));
+
+vi.mock("ws", () => ({
+  default: class {},
+}));
 
 describe("twitch stream session grace", () => {
   it("keeps reconnects within thirty minutes in the same session", () => {
@@ -35,3 +125,190 @@ describe("twitch chat command filtering", () => {
     expect(isIgnoredChatAuthor("RealViewer")).toBe(false);
   });
 });
+
+describe("twitch EventSub subscriptions", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    envMock.TELEGRAM_DELETED_CHANNEL_ID = "-100deleted";
+    envMock.TWITCH_EVENTSUB_USER_TOKEN = "user-token";
+    envMock.TWITCH_EVENTSUB_USER_ID = "9001";
+    privateStreamerLoginsMock.clear();
+    vi.resetAllMocks();
+  });
+
+  it("adds channel.chat.message_delete only when deleted channel credentials are configured", async () => {
+    const { eventSubSubscriptionSpecs } = await import("./twitch.js");
+    expect(eventSubSubscriptionSpecs("1337").map((spec) => spec.type)).toEqual(["stream.online", "stream.offline", "channel.chat.message_delete"]);
+    expect(eventSubSubscriptionSpecs("1337").at(-1)?.condition).toEqual({ broadcaster_user_id: "1337", user_id: "9001" });
+
+    envMock.TELEGRAM_DELETED_CHANNEL_ID = undefined;
+    expect(eventSubSubscriptionSpecs("1337").map((spec) => spec.type)).toEqual(["stream.online", "stream.offline"]);
+  });
+});
+
+describe("twitch EventSub deleted messages", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    envMock.TELEGRAM_DELETED_CHANNEL_ID = "-100deleted";
+    envMock.TWITCH_EVENTSUB_USER_TOKEN = "user-token";
+    envMock.TWITCH_EVENTSUB_USER_ID = "9001";
+    privateStreamerLoginsMock.clear();
+    vi.resetAllMocks();
+  });
+
+  it("posts deleted chat messages for active sessions and links stored media", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    const streamer = { id: "streamer-1", login: "streamer", displayName: "Streamer" };
+    const session = { id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") };
+    const linkedPosts = [
+      {
+        normalizedUrl: "https://example.com/a.jpg",
+        assetId: "asset-1",
+        asset: { status: "stored", telegramChatId: "-100storage", telegramMessageId: 10 },
+      },
+    ];
+    prismaMock.streamer.findUnique.mockResolvedValue(streamer);
+    prismaMock.streamSession.findFirst.mockResolvedValue(session);
+    prismaMock.deletedChatMessage.findUnique.mockResolvedValue(null);
+    prismaMock.deletedChatMessage.create.mockResolvedValue({});
+    prismaMock.deletedChatMessage.update.mockResolvedValue({});
+    prismaMock.twitchChatMessage.findUnique.mockResolvedValue({
+      twitchMessageId: "msg-1",
+      authorTwitchId: "42",
+      authorLogin: "viewer",
+      authorName: "Viewer",
+      messageText: "bad link https://example.com/a.jpg",
+    });
+    prismaMock.chatPost.findMany.mockResolvedValue(linkedPosts);
+    publishDeletedChatMessageMock.mockResolvedValue({ telegramChatId: "-100deleted", telegramMessageId: 20 });
+
+    await handleEventSubMessage(chatMessageDeleteEvent());
+
+    expect(prismaMock.deletedChatMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          streamerId: "streamer-1",
+          streamSessionId: "session-1",
+          twitchMessageId: "msg-1",
+          messageText: "bad link https://example.com/a.jpg",
+        }),
+      }),
+    );
+    expect(prismaMock.chatPost.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          streamSessionId: "session-1",
+          OR: [{ rawTwitchMessageId: "msg-1" }, { twitchMessageId: { startsWith: "msg-1:" } }],
+        }),
+      }),
+    );
+    expect(publishDeletedChatMessageMock).toHaveBeenCalledWith(expect.objectContaining({ linkedPosts }));
+    expect(publishDeletedChatMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorName: "Viewer",
+        authorLogin: "viewer",
+        messageText: "bad link https://example.com/a.jpg",
+      }),
+    );
+    expect(prismaMock.deletedChatMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ telegramMessageId: 20 }),
+      }),
+    );
+  });
+
+  it("ignores non-delete EventSub notifications", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    await handleEventSubMessage(
+      JSON.stringify({
+        metadata: { message_type: "notification", subscription_type: "channel.chat.notification" },
+        payload: { event: { broadcaster_user_id: "1337", broadcaster_user_login: "streamer", broadcaster_user_name: "Streamer" } },
+      }),
+    );
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+    expect(prismaMock.deletedChatMessage.create).not.toHaveBeenCalled();
+  });
+
+  it("does not repost duplicate deleted messages", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.deletedChatMessage.findUnique.mockResolvedValue({ telegramMessageId: 20 });
+
+    await handleEventSubMessage(chatMessageDeleteEvent());
+
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+    expect(prismaMock.deletedChatMessage.create).not.toHaveBeenCalled();
+  });
+
+  it("does not post private streamers or offline sessions", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    privateStreamerLoginsMock.add("streamer");
+    await handleEventSubMessage(chatMessageDeleteEvent());
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+
+    privateStreamerLoginsMock.clear();
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue(null);
+    await handleEventSubMessage(chatMessageDeleteEvent());
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("records live chat messages for later delete events", async () => {
+    const { recordChatMessage } = await import("./twitch.js");
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.twitchChatMessage.upsert.mockResolvedValue({});
+
+    await recordChatMessage({
+      streamerLogin: "streamer",
+      twitchMessageId: "msg-1",
+      authorTwitchId: "42",
+      authorLogin: "viewer",
+      authorName: "Viewer",
+      messageText: "plain chat text",
+      postedAt: new Date("2026-06-12T10:04:00Z"),
+    });
+
+    expect(prismaMock.twitchChatMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { streamerId_twitchMessageId: { streamerId: "streamer-1", twitchMessageId: "msg-1" } },
+        create: expect.objectContaining({ messageText: "plain chat text" }),
+      }),
+    );
+  });
+
+  it("cleans expired chat message buffer using retention minutes", async () => {
+    const { cleanupExpiredChatMessages } = await import("./twitch.js");
+    envMock.TWITCH_CHAT_MESSAGE_RETENTION_MINUTES = 120;
+    prismaMock.twitchChatMessage.deleteMany.mockResolvedValue({ count: 3 });
+
+    const count = await cleanupExpiredChatMessages(new Date("2026-06-12T12:00:00Z"));
+
+    expect(count).toBe(3);
+    expect(prismaMock.twitchChatMessage.deleteMany).toHaveBeenCalledWith({
+      where: { postedAt: { lt: new Date("2026-06-12T10:00:00Z") } },
+    });
+  });
+});
+
+function chatMessageDeleteEvent() {
+  return JSON.stringify({
+    metadata: {
+      message_type: "notification",
+      subscription_type: "channel.chat.message_delete",
+      message_timestamp: "2026-06-12T10:05:00Z",
+    },
+    payload: {
+      event: {
+        broadcaster_user_id: "1337",
+        broadcaster_user_login: "streamer",
+        broadcaster_user_name: "Streamer",
+        target_user_id: "42",
+        target_user_login: "viewer",
+        target_user_name: "Viewer",
+        message_id: "msg-1",
+      },
+    },
+  });
+}

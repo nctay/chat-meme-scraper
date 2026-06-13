@@ -60,30 +60,34 @@ enum StorageProvider {
 }
 
 model Streamer {
-  id            String          @id @default(cuid())
-  twitchUserId  String          @unique
-  login         String          @unique
-  displayName   String
-  enabled       Boolean         @default(true)
-  lastStatus    StreamerStatus  @default(unknown)
-  lastCheckedAt DateTime?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  sessions      StreamSession[]
+  id              String               @id @default(cuid())
+  twitchUserId    String               @unique
+  login           String               @unique
+  displayName     String
+  enabled         Boolean              @default(true)
+  lastStatus      StreamerStatus       @default(unknown)
+  lastCheckedAt   DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  sessions        StreamSession[]
+  chatMessages    TwitchChatMessage[]
+  deletedMessages DeletedChatMessage[]
 
   @@map("streamers")
 }
 
 model StreamSession {
-  id             String              @id @default(cuid())
-  streamerId     String
-  twitchStreamId String?
-  title          String?
-  startedAt      DateTime
-  endedAt        DateTime?
-  status         StreamSessionStatus @default(live)
-  streamer       Streamer            @relation(fields: [streamerId], references: [id], onDelete: Cascade)
-  posts          ChatPost[]
+  id              String               @id @default(cuid())
+  streamerId      String
+  twitchStreamId  String?
+  title           String?
+  startedAt       DateTime
+  endedAt         DateTime?
+  status          StreamSessionStatus  @default(live)
+  streamer        Streamer             @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+  posts           ChatPost[]
+  chatMessages    TwitchChatMessage[]
+  deletedMessages DeletedChatMessage[]
 
   @@index([streamerId, startedAt])
   @@index([status])
@@ -91,26 +95,74 @@ model StreamSession {
 }
 
 model ChatPost {
-  id              String         @id @default(cuid())
-  streamSessionId String
-  twitchMessageId String?        @unique
-  authorTwitchId  String?
-  authorName      String
-  messageText     String
-  originalUrl     String
-  normalizedUrl   String
-  postedAt        DateTime
-  assetId         String?
-  status          ChatPostStatus @default(pending)
-  streamSession   StreamSession  @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
-  asset           Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  downloadJobs    DownloadJob[]
+  id                 String         @id @default(cuid())
+  streamSessionId    String
+  twitchMessageId    String?        @unique
+  rawTwitchMessageId String?
+  authorTwitchId     String?
+  authorName         String
+  messageText        String
+  originalUrl        String
+  normalizedUrl      String
+  postedAt           DateTime
+  assetId            String?
+  status             ChatPostStatus @default(pending)
+  streamSession      StreamSession  @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
+  asset              Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  downloadJobs       DownloadJob[]
 
   @@index([streamSessionId, postedAt])
   @@index([assetId])
   @@index([normalizedUrl])
+  @@index([rawTwitchMessageId])
   @@index([status])
   @@map("chat_posts")
+}
+
+model TwitchChatMessage {
+  id              String        @id @default(cuid())
+  streamerId      String
+  streamSessionId String
+  twitchMessageId String
+  authorTwitchId  String?
+  authorLogin     String?
+  authorName      String
+  messageText     String
+  postedAt        DateTime
+  createdAt       DateTime      @default(now())
+  streamer        Streamer      @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+  streamSession   StreamSession @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([streamerId, twitchMessageId])
+  @@index([streamSessionId, postedAt])
+  @@index([postedAt])
+  @@map("twitch_chat_messages")
+}
+
+model DeletedChatMessage {
+  id                String        @id @default(cuid())
+  streamerId        String
+  streamSessionId   String
+  twitchMessageId   String
+  authorTwitchId    String?
+  authorLogin       String?
+  authorName        String
+  moderatorTwitchId String?
+  moderatorLogin    String?
+  moderatorName     String?
+  messageText       String
+  deletedAt         DateTime
+  telegramChatId    String?
+  telegramMessageId Int?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  streamer          Streamer      @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+  streamSession     StreamSession @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([streamerId, twitchMessageId])
+  @@index([streamSessionId, deletedAt])
+  @@index([deletedAt])
+  @@map("deleted_chat_messages")
 }
 
 model Asset {
@@ -147,18 +199,18 @@ model Asset {
 }
 
 model DownloadJob {
-  id           String            @id @default(cuid())
-  assetId      String?
-  chatPostId   String
-  url          String
-  status       DownloadJobStatus @default(pending)
-  attempts     Int               @default(0)
-  nextRetryAt  DateTime?
-  lastError    String?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  asset        Asset?            @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  chatPost     ChatPost          @relation(fields: [chatPostId], references: [id], onDelete: Cascade)
+  id          String            @id @default(cuid())
+  assetId     String?
+  chatPostId  String
+  url         String
+  status      DownloadJobStatus @default(pending)
+  attempts    Int               @default(0)
+  nextRetryAt DateTime?
+  lastError   String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  asset       Asset?            @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  chatPost    ChatPost          @relation(fields: [chatPostId], references: [id], onDelete: Cascade)
 
   @@index([status, nextRetryAt])
   @@index([assetId])

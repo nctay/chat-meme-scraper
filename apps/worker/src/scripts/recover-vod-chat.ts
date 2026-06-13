@@ -290,9 +290,11 @@ function chatPostData(
   twitchMessageId: string,
   extra: { assetId?: string; status: "pending" | "stored" | "blocked" },
 ) {
+  const rawTwitchMessageId = `vod:${videoId}:${input.comment.id}`;
   return {
     streamSessionId: input.sessionId,
     twitchMessageId,
+    rawTwitchMessageId,
     authorTwitchId: input.comment.commenter?.id,
     authorName: input.authorName,
     messageText: input.messageText,
