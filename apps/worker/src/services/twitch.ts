@@ -259,24 +259,24 @@ async function subscribeEventSub(sessionId: string): Promise<void> {
 }
 
 export function eventSubSubscriptionSpecs(broadcasterUserId: string): Array<{ type: string; version: string; condition: Record<string, string> }> {
-  const specs: Array<{ type: string; version: string; condition: Record<string, string> }> = ["stream.online", "stream.offline"].map((type) => ({
-    type,
-    version: "1",
-    condition: { broadcaster_user_id: broadcasterUserId },
-  }));
-
   if (env.TELEGRAM_DELETED_CHANNEL_ID && env.TWITCH_EVENTSUB_USER_TOKEN && env.TWITCH_EVENTSUB_USER_ID) {
-    specs.push({
+    return [
+      {
       type: "channel.chat.message_delete",
       version: "1",
       condition: {
         broadcaster_user_id: broadcasterUserId,
         user_id: env.TWITCH_EVENTSUB_USER_ID,
       },
-    });
+      },
+    ];
   }
 
-  return specs;
+  return ["stream.online", "stream.offline"].map((type) => ({
+    type,
+    version: "1",
+    condition: { broadcaster_user_id: broadcasterUserId },
+  }));
 }
 
 async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Date): Promise<void> {

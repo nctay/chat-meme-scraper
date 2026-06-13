@@ -138,7 +138,7 @@ describe("twitch EventSub subscriptions", () => {
 
   it("adds channel.chat.message_delete only when deleted channel credentials are configured", async () => {
     const { eventSubSubscriptionSpecs } = await import("./twitch.js");
-    expect(eventSubSubscriptionSpecs("1337").map((spec) => spec.type)).toEqual(["stream.online", "stream.offline", "channel.chat.message_delete"]);
+    expect(eventSubSubscriptionSpecs("1337").map((spec) => spec.type)).toEqual(["channel.chat.message_delete"]);
     expect(eventSubSubscriptionSpecs("1337").at(-1)?.condition).toEqual({ broadcaster_user_id: "1337", user_id: "9001" });
 
     envMock.TELEGRAM_DELETED_CHANNEL_ID = undefined;
