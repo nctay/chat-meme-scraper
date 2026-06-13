@@ -22,6 +22,7 @@ export type StoreMediaMetadata = {
   assetId: string;
   authorName: string;
   messageText: string;
+  telegramSendAsAnimation?: boolean;
 };
 
 export async function storeMedia(filePath: string, mimeType: string, mediaType: Extract<MediaType, "image" | "video">, metadata: StoreMediaMetadata): Promise<StoredMedia> {

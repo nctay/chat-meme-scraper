@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isPlatformMediaUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
+import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isAnimatedWebp, isPlatformMediaUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
@@ -19,6 +19,7 @@ type DownloadResult = {
   mimeType: string;
   mediaType: "image" | "video";
   finalUrl: string;
+  telegramSendAsAnimation?: boolean;
 };
 
 const shaLocks = new Map<string, Promise<void>>();
@@ -80,6 +81,7 @@ async function processOneJob(): Promise<void> {
           assetId,
           authorName: job.chatPost.authorName,
           messageText: job.chatPost.messageText,
+          telegramSendAsAnimation: downloaded.telegramSendAsAnimation,
         });
 
         const asset = await prisma.asset.upsert({
@@ -359,30 +361,63 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
 
 async function finalizeDownload(filePath: string, mediaType: "image" | "video", finalUrl: string, limit: number, originalMimeType?: string): Promise<DownloadResult> {
   let finalPath = filePath;
+  let finalMediaType = mediaType;
+  let finalOriginalMimeType = originalMimeType;
+  let telegramSendAsAnimation = false;
+  let alreadyProcessedVideo = false;
 
   try {
-    if (mediaType === "video") {
+    if (finalMediaType === "image" && isWebpMime(finalOriginalMimeType) && (await isAnimatedWebpFile(filePath))) {
+      finalPath = path.join(os.tmpdir(), `archive-animation-${crypto.randomUUID()}.mp4`);
+      console.log(`[image] converting animated webp input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
+      await convertAnimatedWebpToMp4(filePath, finalPath);
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      finalMediaType = "video";
+      finalOriginalMimeType = undefined;
+      telegramSendAsAnimation = true;
+      alreadyProcessedVideo = true;
+    }
+
+    if (finalMediaType === "video" && !alreadyProcessedVideo) {
       finalPath = path.join(os.tmpdir(), `archive-video-${crypto.randomUUID()}.mp4`);
       console.log(`[video] transcoding input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
       await transcodeForTelegram(filePath, finalPath);
       await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
     }
 
-    const result = await inspectDownloadedFile(finalPath, mediaType);
+    const result = await inspectDownloadedFile(finalPath, finalMediaType);
     if (result.byteSize > limit) {
       throw new Error(`Media exceeded byte limit after processing: ${result.byteSize} > ${limit}`);
     }
 
     return {
       ...result,
-      mimeType: mediaType === "image" && originalMimeType ? originalMimeType : result.mimeType,
+      mimeType: finalMediaType === "image" && finalOriginalMimeType ? finalOriginalMimeType : result.mimeType,
       filePath: finalPath,
-      mediaType,
+      mediaType: finalMediaType,
       finalUrl,
+      telegramSendAsAnimation,
     };
   } catch (error) {
     await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
     if (finalPath !== filePath) await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function isAnimatedWebpFile(filePath: string): Promise<boolean> {
+  return isAnimatedWebp(await fs.promises.readFile(filePath));
+}
+
+function isWebpMime(mimeType: string | undefined): boolean {
+  return mimeType?.split(";")[0]?.trim().toLowerCase() === "image/webp";
+}
+
+async function convertAnimatedWebpToMp4(inputPath: string, outputPath: string): Promise<void> {
+  try {
+    await runImageMagick([inputPath, "-coalesce", outputPath]);
+  } catch (error) {
+    await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
     throw error;
   }
 }
@@ -423,6 +458,39 @@ async function transcodeForTelegram(inputPath: string, outputPath: string): Prom
   } catch (error) {
     await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
     throw error;
+  }
+}
+
+async function runImageMagick(args: string[]): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.PLATFORM_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("magick", args, {
+        stdio: ["ignore", "ignore", "pipe"],
+        signal: controller.signal,
+      });
+      const stderr: Buffer[] = [];
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr.push(chunk);
+      });
+      child.on("error", reject);
+      child.on("close", (code, signal) => {
+        const message = Buffer.concat(stderr).toString("utf8").trim();
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`magick failed${signal ? ` (${signal})` : ""}: ${message || `exit code ${code}`}`));
+      });
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`magick timed out after ${env.PLATFORM_DOWNLOAD_TIMEOUT_MS}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

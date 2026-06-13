@@ -32,9 +32,9 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   const input = new InputFile(fs.createReadStream(filePath), fileName(filePath, mimeType, mediaType));
   const videoMetadata = mediaType === "video" ? await readVideoMetadata(filePath) : {};
   const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage | Message.AnimationMessage>(async () => {
-    if (isGif(mimeType)) {
+    if (isGif(mimeType) || metadata.telegramSendAsAnimation) {
       console.log(`[telegram] sendAnimation mime=${mimeType} file=${path.basename(filePath)}`);
-      return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
+      return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, ...videoMetadata });
     }
     if (mediaType === "image") {
       console.log(`[telegram] sendPhoto mime=${mimeType} file=${path.basename(filePath)}`);

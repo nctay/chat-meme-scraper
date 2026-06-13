@@ -98,8 +98,38 @@ export function mediaTypeFromContentType(contentType: string | null | undefined)
   return "other";
 }
 
+export function isAnimatedWebp(bytes: Uint8Array): boolean {
+  if (bytes.length < 12) return false;
+  if (!matchesAscii(bytes, 0, "RIFF") || !matchesAscii(bytes, 8, "WEBP")) return false;
+
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const chunkSize = readUint32LE(bytes, offset + 4);
+    if (matchesAscii(bytes, offset, "ANIM") || matchesAscii(bytes, offset, "ANMF")) return true;
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  return false;
+}
+
 export function maxBytesForMediaType(type: MediaType, imageLimit = DEFAULT_MAX_IMAGE_BYTES, videoLimit = DEFAULT_MAX_VIDEO_BYTES): number {
   if (type === "image") return imageLimit;
   if (type === "video") return videoLimit;
   return 0;
+}
+
+function matchesAscii(bytes: Uint8Array, offset: number, value: string): boolean {
+  if (offset + value.length > bytes.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (bytes[offset + index] !== value.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+function readUint32LE(bytes: Uint8Array, offset: number): number {
+  return (byteAt(bytes, offset) | (byteAt(bytes, offset + 1) << 8) | (byteAt(bytes, offset + 2) << 16) | (byteAt(bytes, offset + 3) << 24)) >>> 0;
+}
+
+function byteAt(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] ?? 0;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractUrls, isSupportedMediaUrl, mediaTypeFromUrl, normalizeUrl } from "./media.js";
+import { extractUrls, isAnimatedWebp, isSupportedMediaUrl, mediaTypeFromUrl, normalizeUrl } from "./media.js";
 import { shouldStartNewSession } from "./stream-sessions.js";
 
 describe("media helpers", () => {
@@ -37,6 +37,18 @@ describe("media helpers", () => {
     expect(normalizeUrl("https://cdn.discordapp.com/a.png?ex=1&hm=2&width=800&height=600")).toBe(
       "https://cdn.discordapp.com/a.png?width=800&height=600",
     );
+  });
+
+  it("detects animated WebP containers", () => {
+    const animated = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x41, 0x4e, 0x49, 0x4d, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    const still = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20, 0x00, 0x00, 0x00, 0x00,
+    ]);
+
+    expect(isAnimatedWebp(animated)).toBe(true);
+    expect(isAnimatedWebp(still)).toBe(false);
   });
 
   it("splits sessions after two minutes", () => {
