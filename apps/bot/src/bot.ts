@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
 import type { Prisma } from "@prisma/client";
 import { allowedUserIds, env, privateStreamerLogins } from "./env.js";
@@ -66,23 +66,23 @@ adminBot.command("stream", async (ctx) => {
 });
 
 adminBot.callbackQuery(/^latest:(all|image|video):(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await answerCallbackQuerySafely(ctx);
   const [, type, offset] = ctx.match;
   await sendLatest(ctx, type as MediaFilter, Number(offset));
 });
 
 adminBot.callbackQuery(/^streams:(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await answerCallbackQuerySafely(ctx);
   await sendStreams(ctx, Number(ctx.match[1]));
 });
 
 adminBot.callbackQuery(/^openstream:(.+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await answerCallbackQuerySafely(ctx);
   await sendStream(ctx, ctx.match[1]!, "all", 0);
 });
 
 adminBot.callbackQuery(/^stream:(.+):(all|image|video):(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await answerCallbackQuerySafely(ctx);
   const [, streamId, type, offset] = ctx.match;
   await sendStream(ctx, streamId!, type as MediaFilter, Number(offset));
 });
@@ -92,7 +92,7 @@ adminBot.callbackQuery(/^hide:(.+)$/, async (ctx) => {
     where: { id: ctx.match[1] },
     data: { visibility: "hidden" },
   });
-  await ctx.answerCallbackQuery({ text: "Скрыто" });
+  await answerCallbackQuerySafely(ctx, { text: "Скрыто" });
   await ctx.reply(`Скрыто: ${asset.normalizedUrl}`);
 });
 
@@ -133,11 +133,11 @@ adminBot.callbackQuery(/^del:(.+)$/, async (ctx) => {
     });
   });
 
-  await ctx.answerCallbackQuery({ text: "Удалено и заблокировано" });
+  await answerCallbackQuerySafely(ctx, { text: "Удалено и заблокировано" });
   await ctx.reply(`Удалено: ${asset.normalizedUrl}`);
 });
 
-adminBot.catch((error) => console.error("[admin-bot] error", error));
+adminBot.catch((error) => logBotError("admin-bot", error));
 
 const publicBot = env.TELEGRAM_PUBLIC_BOT_TOKEN ? new Bot(env.TELEGRAM_PUBLIC_BOT_TOKEN) : null;
 if (publicBot) {
@@ -152,21 +152,21 @@ if (publicBot) {
   });
 
   publicBot.callbackQuery(/^pub:streamers:(\d+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await answerCallbackQuerySafely(ctx);
     await sendPublicStreamers(ctx, Number(ctx.match[1]));
   });
 
   publicBot.callbackQuery(/^pub:streamer:([^:]+):(\d+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await answerCallbackQuerySafely(ctx);
     await sendPublicStreams(ctx, ctx.match[1]!, Number(ctx.match[2]));
   });
 
   publicBot.callbackQuery(/^pub:stream:([^:]+):(\d+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await answerCallbackQuerySafely(ctx);
     await sendPublicMessages(ctx, ctx.match[1]!, Number(ctx.match[2]));
   });
 
-  publicBot.catch((error) => console.error("[public-bot] error", error));
+  publicBot.catch((error) => logBotError("public-bot", error));
 }
 
 process.on("SIGINT", () => void shutdown());
@@ -199,6 +199,49 @@ type PostWithMedia = Prisma.ChatPostGetPayload<{
   include: { asset: true; streamSession: { include: { streamer: true } } };
 }>;
 type PublicPostWithAsset = Prisma.ChatPostGetPayload<{ include: { asset: true } }>;
+
+type CallbackQueryOptions = Parameters<Context["answerCallbackQuery"]>[0];
+
+async function answerCallbackQuerySafely(ctx: Context, options?: CallbackQueryOptions): Promise<void> {
+  try {
+    await ctx.answerCallbackQuery(options);
+  } catch (error) {
+    if (isExpiredCallbackQueryError(error)) {
+      console.warn("[bot] ignored expired callback query", { callbackData: ctx.callbackQuery?.data });
+      return;
+    }
+    throw error;
+  }
+}
+
+function logBotError(scope: string, error: unknown): void {
+  const botError = error as { error?: unknown; ctx?: Context; name?: string };
+  const cause = botError.error ?? error;
+  console.error(`[${scope}] error`, sanitizeTelegramError(cause), {
+    updateId: botError.ctx?.update.update_id,
+    callbackData: botError.ctx?.callbackQuery?.data,
+    name: botError.name,
+  });
+}
+
+function sanitizeTelegramError(error: unknown): unknown {
+  if (!(error instanceof GrammyError)) return error;
+  return {
+    method: error.method,
+    payload: error.payload,
+    error_code: error.error_code,
+    description: error.description,
+  };
+}
+
+function isExpiredCallbackQueryError(error: unknown): boolean {
+  return (
+    error instanceof GrammyError &&
+    error.method === "answerCallbackQuery" &&
+    error.error_code === 400 &&
+    error.description.includes("query is too old")
+  );
+}
 
 async function sendLatest(ctx: Context, type: MediaFilter, offset: number): Promise<void> {
   const posts = await prisma.chatPost.findMany({
