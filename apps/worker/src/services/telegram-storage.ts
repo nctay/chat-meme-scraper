@@ -162,7 +162,7 @@ export async function publishDeletedChatMessage(metadata: DeletedChatMessageMeta
   for (const post of copyablePosts) {
     const copied = await deletedChannelSendLimiter.schedule(() =>
       telegramBot().api.copyMessage(env.TELEGRAM_DELETED_CHANNEL_ID!, post.asset!.telegramChatId!, post.asset!.telegramMessageId!, {
-        caption: deletedChannelCaption(metadata, post),
+        caption: deletedChannelCaption(metadata),
       }),
     );
     firstMessageId ??= copied.message_id;
@@ -187,12 +187,13 @@ function publicChannelCaption(metadata: StoreMediaMetadata): string {
   return truncate(text ? `${prefix}: ${text}` : prefix, 1000);
 }
 
-function deletedChannelCaption(metadata: DeletedChatMessageMetadata, linkedPost?: DeletedChatMessageMetadata["linkedPosts"][number]): string {
+function deletedChannelCaption(metadata: DeletedChatMessageMetadata): string {
   const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
   const dateTag = hashtag(`date_${formatStreamDateTag(metadata.streamStartedAt)}`);
   const senderTag = hashtag(`user_${metadata.authorLogin || metadata.authorName}`);
-  const linked = linkedPost ? `\nasset=${linkedPost.assetId ?? "none"}\nurl=${linkedPost.normalizedUrl}` : "";
-  return truncate(`${streamerTag} ${dateTag} ${senderTag}: ${metadata.messageText}${linked}`, linkedPost ? 1000 : 3900);
+  const text = stripUrls(metadata.messageText).replace(/\s+/g, " ").trim();
+  const prefix = `${streamerTag} ${dateTag} ${senderTag}`;
+  return truncate(text ? `${prefix}: ${text}` : prefix, 1000);
 }
 
 function hashtag(value: string): string {
