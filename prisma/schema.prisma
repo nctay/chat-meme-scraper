@@ -152,6 +152,7 @@ model DeletedChatMessage {
   moderatorLogin    String?
   moderatorName     String?
   messageText       String
+  skipTelegramPublic Boolean        @default(false)
   deletedAt         DateTime
   telegramChatId    String?
   telegramMessageId Int?

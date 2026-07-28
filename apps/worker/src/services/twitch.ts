@@ -316,6 +316,12 @@ async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Dat
   const authorTwitchId = storedMessage?.authorTwitchId ?? event.target_user_id;
   const authorLogin = storedMessage?.authorLogin ?? event.target_user_login;
   const authorName = storedMessage?.authorName ?? event.target_user_name ?? event.target_user_login ?? "unknown";
+  const skipTelegramPublic = hasSkipTelegramPublicTag(messageText);
+
+  if (existing?.skipTelegramPublic) {
+    console.log(`[eventsub] skip deleted message user_tag channel=${login} message=${twitchMessageId}`);
+    return;
+  }
 
   let canPublish = false;
   if (existing) {
@@ -335,6 +341,7 @@ async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Dat
           authorLogin,
           authorName,
           messageText,
+          skipTelegramPublic,
           deletedAt,
         },
       });
@@ -351,6 +358,14 @@ async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Dat
   if (!canPublish) return;
 
   const linkedPosts = await findPostsForRawTwitchMessage(session.id, twitchMessageId);
+  if (skipTelegramPublic || linkedPosts.some((post) => post.skipTelegramPublic)) {
+    console.log(`[eventsub] skip deleted message user_tag channel=${login} message=${twitchMessageId}`);
+    await prisma.deletedChatMessage.update({
+      where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
+      data: { skipTelegramPublic: true },
+    });
+    return;
+  }
   const published = await publishDeletedChatMessage({
     streamerLogin: streamer.login,
     streamStartedAt: session.startedAt,
@@ -371,6 +386,7 @@ async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Dat
       authorLogin,
       authorName,
       messageText,
+      skipTelegramPublic: false,
       deletedAt,
       telegramChatId: published?.telegramChatId,
       telegramMessageId: published?.telegramMessageId,

@@ -298,6 +298,27 @@ describe("twitch EventSub deleted messages", () => {
     expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
   });
 
+  it("does not post messages tagged to skip Telegram to the deleted channel", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.deletedChatMessage.findUnique.mockResolvedValue(null);
+    prismaMock.deletedChatMessage.create.mockResolvedValue({});
+    prismaMock.twitchChatMessage.findUnique.mockResolvedValue({
+      twitchMessageId: "msg-1",
+      authorName: "Viewer",
+      messageText: "https://example.com/a.jpg !skip_tg",
+    });
+    prismaMock.chatPost.findMany.mockResolvedValue([]);
+
+    await handleEventSubMessage(chatMessageDeleteEvent());
+
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+    expect(prismaMock.deletedChatMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ skipTelegramPublic: true }) }),
+    );
+  });
+
   it("records live chat messages for later delete events", async () => {
     const { recordChatMessage } = await import("./twitch.js");
     prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
