@@ -106,6 +106,7 @@ model ChatPost {
   normalizedUrl      String
   postedAt           DateTime
   assetId            String?
+  skipTelegramPublic Boolean        @default(false)
   status             ChatPostStatus @default(pending)
   streamSession      StreamSession  @relation(fields: [streamSessionId], references: [id], onDelete: Cascade)
   asset              Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
@@ -175,6 +176,8 @@ model Asset {
   telegramMessageId    Int?
   telegramFileId       String?
   telegramFileUniqueId String?
+  publicTelegramChatId String?
+  publicTelegramMessageId Int?
   s3Key                String?
   publicUrl            String?
   mimeType             String?

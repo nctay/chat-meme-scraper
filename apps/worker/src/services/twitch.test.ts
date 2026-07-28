@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
+import { hasSkipTelegramPublicTag, isIgnoredChatAuthor, isIgnoredChatCommand, stripSkipTelegramPublicTag } from "./chat-filter.js";
 import { isWithinOfflineGrace } from "./stream-grace.js";
 
 const envMock = vi.hoisted(() => ({
@@ -29,6 +29,7 @@ const envMock = vi.hoisted(() => ({
 
 const privateStreamerLoginsMock = vi.hoisted(() => new Set<string>());
 const publishDeletedChatMessageMock = vi.hoisted(() => vi.fn());
+const publishStoredTelegramMediaMock = vi.hoisted(() => vi.fn());
 const prismaMock = vi.hoisted(() => ({
   streamer: {
     findMany: vi.fn(),
@@ -64,6 +65,7 @@ const prismaMock = vi.hoisted(() => ({
   asset: {
     findUnique: vi.fn(),
     upsert: vi.fn(),
+    updateMany: vi.fn(),
   },
   downloadJob: {
     findFirst: vi.fn(),
@@ -82,6 +84,7 @@ vi.mock("../prisma.js", () => ({
 
 vi.mock("./telegram-storage.js", () => ({
   publishDeletedChatMessage: publishDeletedChatMessageMock,
+  publishStoredTelegramMedia: publishStoredTelegramMediaMock,
 }));
 
 vi.mock("tmi.js", () => ({
@@ -123,6 +126,47 @@ describe("twitch chat command filtering", () => {
     expect(isIgnoredChatAuthor("StreamElements")).toBe(true);
     expect(isIgnoredChatAuthor(" streamelements ")).toBe(true);
     expect(isIgnoredChatAuthor("RealViewer")).toBe(false);
+  });
+
+  it("recognizes and removes the public Telegram skip tag", () => {
+    expect(hasSkipTelegramPublicTag("look https://example.com/a.jpg !skip_tg now")).toBe(true);
+    expect(hasSkipTelegramPublicTag("!skip_tghttps://example.com/a.jpg")).toBe(true);
+    expect(hasSkipTelegramPublicTag("https://example.com/a.jpg!skip_tg")).toBe(true);
+    expect(hasSkipTelegramPublicTag("!skip_tg_extra https://example.com/a.jpg")).toBe(false);
+    expect(stripSkipTelegramPublicTag("look !skip_tg now")).toBe("look now");
+    expect(stripSkipTelegramPublicTag("!skip_tghttps://example.com/a.jpg")).toBe("https://example.com/a.jpg");
+    expect(stripSkipTelegramPublicTag("https://example.com/a.jpg!skip_tg")).toBe("https://example.com/a.jpg");
+  });
+});
+
+describe("twitch media ingestion", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.resetAllMocks();
+  });
+
+  it("stores the public Telegram skip flag with the media post", async () => {
+    const { ingestChatMessage } = await import("./twitch.js");
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.blockedMedia.findUnique.mockResolvedValue(null);
+    prismaMock.asset.findUnique.mockResolvedValue(null);
+    prismaMock.chatPost.create.mockResolvedValue({ id: "post-1" });
+    prismaMock.asset.upsert.mockResolvedValue({ id: "asset-1" });
+    prismaMock.downloadJob.findFirst.mockResolvedValue(null);
+    prismaMock.downloadJob.create.mockResolvedValue({});
+
+    await ingestChatMessage({
+      streamerLogin: "streamer",
+      twitchMessageId: "message-1",
+      authorName: "Viewer",
+      messageText: "!skip_tghttps://example.com/a.jpg",
+      postedAt: new Date("2026-06-12T10:04:00Z"),
+    });
+
+    expect(prismaMock.chatPost.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ skipTelegramPublic: true }) }),
+    );
   });
 });
 

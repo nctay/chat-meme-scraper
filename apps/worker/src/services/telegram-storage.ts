@@ -4,7 +4,9 @@ import { spawn } from "node:child_process";
 import { Bot, InputFile } from "grammy";
 import type { Message } from "grammy/types";
 import { env, privateStreamerLogins } from "../env.js";
-import type { StoreMediaMetadata, StoredMedia } from "./storage.js";
+import { prisma } from "../prisma.js";
+import { stripSkipTelegramPublicTag } from "./chat-filter.js";
+import type { PublicTelegramMediaMetadata, StoreMediaMetadata, StoredMedia } from "./storage.js";
 import { SerialRateLimiter, withTelegramRetry } from "./rate-limit.js";
 
 let bot: Bot | null = null;
@@ -46,8 +48,6 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   const file = "photo" in message ? message.photo.at(-1) : "video" in message ? message.video : message.animation;
   if (!file) throw new Error("Telegram did not return stored file metadata");
 
-  await publishTelegramMedia(message.chat.id, message.message_id, metadata);
-
   return {
     storageProvider: "telegram",
     telegramChatId: String(message.chat.id),
@@ -55,6 +55,21 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
     telegramFileId: file.file_id,
     telegramFileUniqueId: file.file_unique_id,
   };
+}
+
+export async function publishStoredTelegramMedia(
+  asset: { id: string; telegramChatId: string | null; telegramMessageId: number | null; publicTelegramChatId: string | null; publicTelegramMessageId: number | null },
+  metadata: PublicTelegramMediaMetadata,
+): Promise<void> {
+  if (!asset.telegramChatId || !asset.telegramMessageId || asset.publicTelegramMessageId) return;
+
+  const copied = await publishTelegramMedia(asset.telegramChatId, asset.telegramMessageId, metadata);
+  if (!copied) return;
+
+  await prisma.asset.updateMany({
+    where: { id: asset.id, publicTelegramMessageId: null },
+    data: { publicTelegramChatId: copied.telegramChatId, publicTelegramMessageId: copied.telegramMessageId },
+  });
 }
 
 export async function deleteTelegramMedia(asset: { telegramChatId: string | null; telegramMessageId: number | null }): Promise<void> {
@@ -121,18 +136,23 @@ function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: StoreMediaMetadata): Promise<void> {
-  if (!env.TELEGRAM_PUBLIC_CHANNEL_ID) return;
+async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: PublicTelegramMediaMetadata): Promise<{ telegramChatId: string; telegramMessageId: number } | null> {
+  if (metadata.skipTelegramPublic) {
+    console.log(`[telegram] skip public channel user_tag streamer=${metadata.streamerLogin}`);
+    return null;
+  }
+  if (!env.TELEGRAM_PUBLIC_CHANNEL_ID) return null;
   if (privateStreamerLogins.has(metadata.streamerLogin.toLowerCase())) {
     console.log(`[telegram] skip public channel private_streamer=${metadata.streamerLogin}`);
-    return;
+    return null;
   }
 
-  await publicChannelSendLimiter.schedule(() =>
+  const copied = await publicChannelSendLimiter.schedule(() =>
     telegramBot().api.copyMessage(env.TELEGRAM_PUBLIC_CHANNEL_ID!, storageChatId, storageMessageId, {
       caption: publicChannelCaption(metadata),
     }),
   );
+  return { telegramChatId: env.TELEGRAM_PUBLIC_CHANNEL_ID, telegramMessageId: copied.message_id };
 }
 
 export type DeletedChatMessageMetadata = {
@@ -178,11 +198,11 @@ export async function publishDeletedChatMessage(metadata: DeletedChatMessageMeta
   return { telegramChatId: String(sent.chat.id), telegramMessageId: sent.message_id };
 }
 
-function publicChannelCaption(metadata: StoreMediaMetadata): string {
+function publicChannelCaption(metadata: PublicTelegramMediaMetadata): string {
   const streamerTag = hashtag(`${metadata.streamerLogin}_stream`);
   const dateTag = hashtag(`date_${formatStreamDateTag(metadata.streamStartedAt)}`);
   const senderTag = hashtag(`user_${metadata.authorName}`);
-  const text = stripUrls(metadata.messageText).replace(/\s+/g, " ").trim();
+  const text = stripSkipTelegramPublicTag(stripUrls(metadata.messageText));
   const prefix = `${streamerTag} ${dateTag} ${senderTag}`;
   return truncate(text ? `${prefix}: ${text}` : prefix, 1000);
 }

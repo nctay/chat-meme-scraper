@@ -507,6 +507,7 @@ function mediaCaption(post: PostWithMedia): string {
 function publicStoredPostWhere() {
   return {
     status: "stored" as const,
+    skipTelegramPublic: false,
     asset: {
       status: "stored" as const,
       visibility: "public" as const,
@@ -552,7 +553,7 @@ function isAllowedAdmin(ctx: Context): boolean {
 }
 
 function publicMediaCaption(post: PublicPostWithAsset): string {
-  const text = stripUrls(post.messageText).replace(/\s+/g, " ").trim();
+  const text = stripSkipTelegramPublicTag(stripUrls(post.messageText));
   const prefix = `[${formatMoscowTime(post.postedAt)}] [${post.authorName}]`;
   if (!text) return prefix;
   return truncate(`${prefix}: ${text}`, 1000);
@@ -569,6 +570,10 @@ function schedulePublicChatMessage<T>(chatId: number | string, task: () => Promi
 
 function stripUrls(text: string): string {
   return text.replace(/https?:\/\/\S+/gi, "").trim();
+}
+
+function stripSkipTelegramPublicTag(text: string): string {
+  return text.replace(/!skip_tg(?=https?:\/\/|\s|$)/gi, " ").replace(/\s+/g, " ").trim();
 }
 
 function truncate(text: string, maxLength: number): string {

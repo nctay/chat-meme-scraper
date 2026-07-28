@@ -11,6 +11,7 @@ import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
 import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-download.js";
+import { publishStoredTelegramMedia } from "./telegram-storage.js";
 
 type DownloadResult = {
   filePath: string;
@@ -48,6 +49,7 @@ async function processOneJob(): Promise<void> {
     const existingStoredAsset = existingByUrl?.status === "stored" ? existingByUrl : await findStoredAssetForNormalizedUrl(normalizedUrl);
     if (existingStoredAsset) {
       await markStoredReferences(existingStoredAsset.id, normalizedUrl, job.id, job.chatPostId, existingByUrl?.id ?? job.assetId);
+      await publishStoredTelegramMedia(existingStoredAsset, publicMetadata(job));
       console.log(`[download] reused-stored job=${job.id} asset=${existingStoredAsset.id}`);
       return;
     }
@@ -66,6 +68,7 @@ async function processOneJob(): Promise<void> {
         const existingByHash = await prisma.asset.findUnique({ where: { sha256: downloaded.sha256 } });
         if (existingByHash?.status === "stored") {
           await markStoredReferences(existingByHash.id, normalizedUrl, job.id, job.chatPostId, existingByUrl?.id ?? job.assetId);
+          await publishStoredTelegramMedia(existingByHash, publicMetadata(job));
           return;
         }
 
@@ -81,6 +84,7 @@ async function processOneJob(): Promise<void> {
           assetId,
           authorName: job.chatPost.authorName,
           messageText: job.chatPost.messageText,
+          skipTelegramPublic: job.chatPost.skipTelegramPublic,
           telegramSendAsAnimation: downloaded.telegramSendAsAnimation,
         });
 
@@ -96,6 +100,8 @@ async function processOneJob(): Promise<void> {
             telegramMessageId: stored.telegramMessageId,
             telegramFileId: stored.telegramFileId,
             telegramFileUniqueId: stored.telegramFileUniqueId,
+            publicTelegramChatId: null,
+            publicTelegramMessageId: null,
             s3Key: stored.s3Key,
             publicUrl: stored.publicUrl,
             mimeType: downloaded.mimeType,
@@ -122,6 +128,7 @@ async function processOneJob(): Promise<void> {
         });
 
         await markStoredReferences(asset.id, normalizedUrl, job.id, job.chatPostId);
+        await publishStoredTelegramMedia(asset, publicMetadata(job));
         console.log(`[download] stored job=${job.id} asset=${asset.id} bytes=${downloaded.byteSize} mime=${downloaded.mimeType}`);
       });
     } finally {
@@ -144,6 +151,16 @@ async function processOneJob(): Promise<void> {
     }
     console.error(`[download] failed job=${job.id} asset=${job.assetId ?? "none"} attempts=${currentAttempts} retry=${retry} error=${message}`);
   }
+}
+
+function publicMetadata(job: NonNullable<Awaited<ReturnType<typeof claimDownloadJob>>>) {
+  return {
+    streamerLogin: job.chatPost.streamSession.streamer.login,
+    streamStartedAt: job.chatPost.streamSession.startedAt,
+    authorName: job.chatPost.authorName,
+    messageText: job.chatPost.messageText,
+    skipTelegramPublic: job.chatPost.skipTelegramPublic,
+  };
 }
 
 async function claimDownloadJob() {

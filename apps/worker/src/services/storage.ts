@@ -22,8 +22,11 @@ export type StoreMediaMetadata = {
   assetId: string;
   authorName: string;
   messageText: string;
+  skipTelegramPublic: boolean;
   telegramSendAsAnimation?: boolean;
 };
+
+export type PublicTelegramMediaMetadata = Pick<StoreMediaMetadata, "streamerLogin" | "streamStartedAt" | "authorName" | "messageText" | "skipTelegramPublic">;
 
 export async function storeMedia(filePath: string, mimeType: string, mediaType: Extract<MediaType, "image" | "video">, metadata: StoreMediaMetadata): Promise<StoredMedia> {
   return storeTelegramMedia(filePath, mimeType, mediaType, metadata);

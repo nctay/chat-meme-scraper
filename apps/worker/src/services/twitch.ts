@@ -3,9 +3,9 @@ import WebSocket from "ws";
 import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env, privateStreamerLogins } from "../env.js";
-import { isIgnoredChatAuthor, isIgnoredChatCommand } from "./chat-filter.js";
+import { hasSkipTelegramPublicTag, isIgnoredChatAuthor, isIgnoredChatCommand, stripSkipTelegramPublicTag } from "./chat-filter.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
-import { publishDeletedChatMessage } from "./telegram-storage.js";
+import { publishDeletedChatMessage, publishStoredTelegramMedia } from "./telegram-storage.js";
 
 type TwitchStream = {
   id: string;
@@ -448,7 +448,8 @@ export async function ingestChatMessage(input: {
     return;
   }
 
-  const urls = extractUrls(input.messageText).filter(isSupportedMediaUrl);
+  const skipTelegramPublic = hasSkipTelegramPublicTag(input.messageText);
+  const urls = extractUrls(skipTelegramPublic ? stripSkipTelegramPublicTag(input.messageText) : input.messageText).filter(isSupportedMediaUrl);
   if (urls.length === 0) return;
 
   const streamer = await prisma.streamer.findUnique({ where: { login: input.streamerLogin } });
@@ -481,6 +482,7 @@ export async function ingestChatMessage(input: {
           originalUrl: rawUrl,
           normalizedUrl,
           postedAt: input.postedAt,
+          skipTelegramPublic,
           status: "blocked",
         },
       });
@@ -501,12 +503,20 @@ export async function ingestChatMessage(input: {
         normalizedUrl,
         postedAt: input.postedAt,
         assetId: reusableAsset?.id ?? existingAsset?.id,
+        skipTelegramPublic,
         status: reusableAsset ? "stored" : "pending",
       },
     });
 
     if (reusableAsset) {
       console.log(`[download] reused asset=${reusableAsset.id} chatPost=${post.id}`);
+      await publishStoredTelegramMedia(reusableAsset, {
+        streamerLogin: streamer.login,
+        streamStartedAt: session.startedAt,
+        authorName: input.authorName,
+        messageText: input.messageText,
+        skipTelegramPublic,
+      });
     } else {
       const asset =
         existingAsset ??
