@@ -188,7 +188,7 @@ describe("twitch EventSub subscriptions", () => {
     expect(eventSubSubscriptionSpecs("1337").at(-1)?.condition).toEqual({ broadcaster_user_id: "1337", user_id: "9001" });
 
     envMock.TELEGRAM_DELETED_CHANNEL_ID = undefined;
-    expect(eventSubSubscriptionSpecs("1337").map((spec) => spec.type)).toEqual(["stream.online", "stream.offline"]);
+    expect(eventSubSubscriptionSpecs("1337")).toEqual([]);
   });
 });
 

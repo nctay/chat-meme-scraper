@@ -77,7 +77,7 @@ export async function pollTwitchStreams(): Promise<void> {
 }
 
 export function ensureEventSubConnected(): void {
-  if (eventSubSocket || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || channelLogins().length === 0) return;
+  if (eventSubSocket || !eventSubEnabled() || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || channelLogins().length === 0) return;
 
   console.log("[eventsub] connecting websocket");
   eventSubSocket = new WebSocket("wss://eventsub.wss.twitch.tv/ws");
@@ -288,24 +288,24 @@ async function subscribeEventSub(sessionId: string): Promise<void> {
 }
 
 export function eventSubSubscriptionSpecs(broadcasterUserId: string): Array<{ type: string; version: string; condition: Record<string, string> }> {
-  if (env.TELEGRAM_DELETED_CHANNEL_ID && env.TWITCH_EVENTSUB_USER_TOKEN && env.TWITCH_EVENTSUB_USER_ID) {
+  if (eventSubEnabled()) {
     return [
       {
-      type: "channel.chat.message_delete",
-      version: "1",
-      condition: {
-        broadcaster_user_id: broadcasterUserId,
-        user_id: env.TWITCH_EVENTSUB_USER_ID,
-      },
+        type: "channel.chat.message_delete",
+        version: "1",
+        condition: {
+          broadcaster_user_id: broadcasterUserId,
+          user_id: env.TWITCH_EVENTSUB_USER_ID!,
+        },
       },
     ];
   }
 
-  return ["stream.online", "stream.offline"].map((type) => ({
-    type,
-    version: "1",
-    condition: { broadcaster_user_id: broadcasterUserId },
-  }));
+  return [];
+}
+
+function eventSubEnabled(): boolean {
+  return Boolean(env.TELEGRAM_DELETED_CHANNEL_ID && env.TWITCH_EVENTSUB_USER_TOKEN && env.TWITCH_EVENTSUB_USER_ID);
 }
 
 async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Date): Promise<void> {
