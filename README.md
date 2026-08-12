@@ -1,10 +1,10 @@
-# Twitch Telegram Archive
+# Twitch / w.tv Telegram Archive
 
-Telegram-only архиватор медиа из Twitch-чата.
+Telegram-only архиватор медиа из Twitch и w.tv чатов.
 
 Схема v1:
 
-- `worker` читает Twitch chat, скачивает картинки/видео, дедуплицирует по URL/SHA-256 и сохраняет оригинальное сообщение в приватный Telegram storage-канал.
+- `worker` читает Twitch/w.tv chat, скачивает картинки/видео, дедуплицирует по URL/SHA-256 и сохраняет оригинальное сообщение в приватный Telegram storage-канал.
 - `bot` запускает два Telegram-бота: админский для модерации и публичный для просмотра архива.
 - `postgres` хранит стримеров, стримы, сообщения, assets, moderation/blocklist.
 
@@ -31,6 +31,7 @@ TWITCH_EVENTSUB_USER_ID=""
 TWITCH_BOT_USERNAME=""
 TWITCH_BOT_OAUTH="oauth:"
 TWITCH_CHANNELS="streamer_login"
+WTV_CHANNELS="kingkong_movie,mishamedvedka"
 
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_STORAGE_CHAT_ID="-100..."
@@ -45,6 +46,8 @@ MAX_DAILY_DOWNLOAD_BYTES="10737418240"
 MAX_PARALLEL_DOWNLOADS="2"
 ALLOW_PRIVATE_MEDIA_HOSTS="false"
 ```
+
+`WTV_CHANNELS` принимает ники или URL через запятую, например `kingkong_movie,mishamedvedka`.
 
 Админского и публичного Telegram-ботов добавь в приватный storage-канал, чтобы оба могли делать `copyMessage`.
 

@@ -10,6 +10,8 @@ export const env = z
     TWITCH_BOT_USERNAME: z.string().optional(),
     TWITCH_BOT_OAUTH: z.string().optional(),
     TWITCH_CHANNELS: z.string().default(""),
+    WTV_CHANNELS: z.string().default(""),
+    WTV_COOKIE: z.string().optional(),
     TELEGRAM_BOT_TOKEN: z.string().optional(),
     TELEGRAM_STORAGE_CHAT_ID: z.string().optional(),
     TELEGRAM_PUBLIC_CHANNEL_ID: z.string().optional(),
@@ -31,8 +33,31 @@ export const twitchChannels = env.TWITCH_CHANNELS.split(",")
   .map((channel) => channel.trim().toLowerCase().replace(/^#/, ""))
   .filter(Boolean);
 
+export const wtvChannels = env.WTV_CHANNELS.split(",")
+  .map((channel) => parseWtvChannel(channel))
+  .filter(Boolean);
+
 export const privateStreamerLogins = new Set(
   env.TELEGRAM_PRIVATE_STREAMER_LOGINS.split(",")
     .map((login) => login.trim().toLowerCase())
     .filter(Boolean),
 );
+
+function parseWtvChannel(channel: string): string {
+  const trimmed = channel.trim();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname.toLowerCase() === "w.tv") {
+      return url.pathname.split("/").filter(Boolean)[0]?.toLowerCase() ?? "";
+    }
+  } catch {
+    // Not a URL; treat it as a nickname/id below.
+  }
+
+  return trimmed
+    .replace(/^@/, "")
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+}

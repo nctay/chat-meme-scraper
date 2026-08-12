@@ -453,6 +453,7 @@ export async function ingestChatMessage(input: {
   authorName: string;
   messageText: string;
   postedAt: Date;
+  skipTelegramPublic?: boolean;
 }): Promise<void> {
   if (isIgnoredChatAuthor(input.authorName)) {
     console.log(`[chat] ignored author channel=${input.streamerLogin} author=${input.authorName}`);
@@ -464,7 +465,7 @@ export async function ingestChatMessage(input: {
     return;
   }
 
-  const skipTelegramPublic = hasSkipTelegramPublicTag(input.messageText);
+  const skipTelegramPublic = input.skipTelegramPublic === true || hasSkipTelegramPublicTag(input.messageText);
   const urls = extractUrls(skipTelegramPublic ? stripSkipTelegramPublicTag(input.messageText) : input.messageText).filter(isSupportedMediaUrl);
   if (urls.length === 0) return;
 
