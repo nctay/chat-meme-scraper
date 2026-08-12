@@ -72,6 +72,13 @@ describe("w.tv polling", () => {
               sender: { userId: "viewer-1", nickname: "Viewer" },
               createdAt: "2026-08-12T19:44:49.276Z",
             },
+            {
+              messageId: "msg-2",
+              type: "MESSAGE",
+              content: "look https://example.com/a.jpg ME-6HuFCn8.gif",
+              sender: { userId: "viewer-2", nickname: "Viewer2" },
+              createdAt: "2026-08-12T19:45:49.276Z",
+            },
           ],
         });
       }
@@ -105,13 +112,16 @@ describe("w.tv polling", () => {
         }),
       }),
     );
+    const fetchCalls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(fetchCalls.some(([url]) => String(url).includes("limit=100"))).toBe(true);
+    expect(ingestChatMessageMock).toHaveBeenCalledTimes(1);
     expect(ingestChatMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         streamerLogin: "kingkong_movie",
-        twitchMessageId: "wtv:msg-1",
-        authorTwitchId: "wtv:viewer-1",
-        authorName: "Viewer",
-        skipTelegramPublic: true,
+        twitchMessageId: "wtv:msg-2",
+        authorTwitchId: "wtv:viewer-2",
+        authorName: "Viewer2",
+        messageText: "look https://example.com/a.jpg",
       }),
     );
   });

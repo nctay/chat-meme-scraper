@@ -154,7 +154,8 @@ async function ingestRecentMessages(login: string, channelId: string): Promise<v
   const body = await fetchWtvMessages(channelId);
   for (const message of [...body.messages].reverse()) {
     if (message.type !== "MESSAGE" || !message.content || !message.sender?.nickname) continue;
-    if (!extractUrls(message.content).some(isSupportedMediaUrl)) {
+    const messageText = cleanWtvMessageText(message.content);
+    if (!extractUrls(messageText).some(isSupportedMediaUrl)) {
       wtvMessageSeenIds.add(message.messageId);
       continue;
     }
@@ -172,9 +173,8 @@ async function ingestRecentMessages(login: string, channelId: string): Promise<v
       twitchMessageId: sourceMessageId,
       authorTwitchId: message.sender.userId ? `wtv:${message.sender.userId}` : undefined,
       authorName: message.sender.nickname,
-      messageText: message.content,
+      messageText,
       postedAt: parseDate(message.createdAt),
-      skipTelegramPublic: true,
     });
     wtvMessageSeenIds.add(message.messageId);
   }
@@ -193,7 +193,7 @@ async function fetchWtvChannel(channelId: string): Promise<WtvChannelResponse> {
 }
 
 async function fetchWtvMessages(channelId: string): Promise<WtvMessagesResponse> {
-  return fetchWtvJson<WtvMessagesResponse>(`${chatApiUrl}/chats/${encodeURIComponent(channelId)}/messages`, channelId, { limit: "50" });
+  return fetchWtvJson<WtvMessagesResponse>(`${chatApiUrl}/chats/${encodeURIComponent(channelId)}/messages`, channelId, { limit: "100" });
 }
 
 async function fetchWtvJson<T>(url: string, refererChannel: string, query: Record<string, string> = {}): Promise<T> {
@@ -240,6 +240,27 @@ async function finalizeExpiredGraceSessions(): Promise<void> {
 function parseDate(value: string): Date {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function cleanWtvMessageText(messageText: string): string {
+  let cleaned = messageText;
+  for (const url of extractUrls(messageText)) {
+    if (isIgnoredWtvStickerUrl(url)) cleaned = cleaned.replace(url, " ");
+  }
+  return cleaned
+    .replace(/\bGSS-media\S*/gi, " ")
+    .replace(/\bME-[a-z0-9_-]+\.(?:gif|png|webp|jpe?g)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isIgnoredWtvStickerUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+    return url.hostname.toLowerCase().startsWith("gss-");
+  } catch {
+    return /^gss-/i.test(rawUrl);
+  }
 }
 
 function isUuid(value: string): boolean {
