@@ -97,17 +97,47 @@ export function ensureEventSubConnected(): void {
 
 export async function ensureChatConnected(): Promise<void> {
   const channels = channelLogins();
-  if (chatClient || chatConnecting || channels.length === 0 || !env.TWITCH_BOT_USERNAME || !env.TWITCH_BOT_OAUTH) return;
+  if (chatClient || chatConnecting || channels.length === 0) return;
 
   chatConnecting = true;
   console.log(`[chat] connecting channels=${channels.join(",")}`);
-  chatClient = new tmi.Client({
-    identity: { username: env.TWITCH_BOT_USERNAME, password: env.TWITCH_BOT_OAUTH },
+  const useAuthenticatedChat = Boolean(env.TWITCH_BOT_USERNAME && env.TWITCH_BOT_OAUTH);
+  chatClient = createChatClient(channels, useAuthenticatedChat);
+  attachChatHandlers(chatClient);
+
+  try {
+    await chatClient.connect();
+    console.log(`[chat] connected mode=${useAuthenticatedChat ? "authenticated" : "anonymous"}`);
+  } catch (error) {
+    const message = errorMessage(error);
+    if (useAuthenticatedChat && /login authentication failed/i.test(message)) {
+      console.warn("[chat] authenticated connect failed; retrying anonymous");
+      await disconnectChatClient(chatClient);
+      chatClient = createChatClient(channels, false);
+      attachChatHandlers(chatClient);
+      await chatClient.connect();
+      console.log("[chat] connected mode=anonymous");
+      return;
+    }
+
+    chatClient = null;
+    console.error("[chat] connect failed", error);
+    throw error;
+  } finally {
+    chatConnecting = false;
+  }
+}
+
+function createChatClient(channels: string[], authenticated: boolean): InstanceType<typeof tmi.Client> {
+  return new tmi.Client({
+    ...(authenticated ? { identity: { username: env.TWITCH_BOT_USERNAME!, password: env.TWITCH_BOT_OAUTH! } } : {}),
     channels: [...channels],
     connection: { reconnect: true, secure: true },
   });
+}
 
-  chatClient.on("message", async (channel: string, tags: Record<string, string | undefined>, message: string, self: boolean) => {
+function attachChatHandlers(client: InstanceType<typeof tmi.Client>): void {
+  client.on("message", async (channel: string, tags: Record<string, string | undefined>, message: string, self: boolean) => {
     const login = channel.replace(/^#/, "").toLowerCase();
     const authorName = tags["display-name"] ?? tags.username ?? "unknown";
     const urls = extractUrls(message);
@@ -141,7 +171,7 @@ export async function ensureChatConnected(): Promise<void> {
       console.error("Failed to ingest chat message", error);
     }
   });
-  const chatEvents = chatClient as unknown as {
+  const chatEvents = client as unknown as {
     on(event: "disconnected", handler: (reason: string) => void): void;
     on(event: "reconnect", handler: () => void): void;
     on(event: "notice", handler: (channel: string, msgid: string, message: string) => void): void;
@@ -151,17 +181,16 @@ export async function ensureChatConnected(): Promise<void> {
   chatEvents.on("notice", (channel: string, msgid: string, message: string) => {
     console.warn(`[chat] notice channel=${channel} msgid=${msgid} message=${message}`);
   });
+}
 
-  try {
-    await chatClient.connect();
-    console.log("[chat] connected");
-  } catch (error) {
-    chatClient = null;
-    console.error("[chat] connect failed", error);
-    throw error;
-  } finally {
-    chatConnecting = false;
-  }
+async function disconnectChatClient(client: InstanceType<typeof tmi.Client>): Promise<void> {
+  const disconnect = (client as unknown as { disconnect?: () => Promise<unknown> }).disconnect;
+  if (!disconnect) return;
+  await disconnect.call(client).catch(() => undefined);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function handleEventSubMessage(raw: string): Promise<void> {
