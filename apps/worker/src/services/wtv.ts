@@ -1,8 +1,9 @@
-import { extractUrls, isSupportedMediaUrl } from "@archive/core";
+import { extractUrls } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env, wtvChannels } from "../env.js";
 import { ingestChatMessage } from "./twitch.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
+import { isSupportedMediaCandidateUrl } from "./redirect-resolver.js";
 
 type WtvProfileResponse = {
   profile: {
@@ -155,7 +156,7 @@ async function ingestRecentMessages(login: string, channelId: string): Promise<v
   for (const message of [...body.messages].reverse()) {
     if (message.type !== "MESSAGE" || !message.content || !message.sender?.nickname) continue;
     const messageText = cleanWtvMessageText(message.content);
-    if (!extractUrls(messageText).some(isSupportedMediaUrl)) {
+    if (!extractUrls(messageText).some(isSupportedMediaCandidateUrl)) {
       wtvMessageSeenIds.add(message.messageId);
       continue;
     }

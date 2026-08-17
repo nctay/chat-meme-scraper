@@ -1,11 +1,12 @@
 import tmi from "tmi.js";
 import WebSocket from "ws";
-import { extractUrls, isSupportedMediaUrl, normalizeUrl } from "@archive/core";
+import { extractUrls, normalizeUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env, privateStreamerLogins } from "../env.js";
 import { hasSkipTelegramPublicTag, isIgnoredChatAuthor, isIgnoredChatCommand, stripSkipTelegramPublicTag } from "./chat-filter.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
 import { publishDeletedChatMessage, publishStoredTelegramMedia } from "./telegram-storage.js";
+import { isSupportedMediaCandidateUrl, resolveSupportedMediaUrl } from "./redirect-resolver.js";
 
 type TwitchStream = {
   id: string;
@@ -141,7 +142,7 @@ function attachChatHandlers(client: InstanceType<typeof tmi.Client>): void {
     const login = channel.replace(/^#/, "").toLowerCase();
     const authorName = tags["display-name"] ?? tags.username ?? "unknown";
     const urls = extractUrls(message);
-    const mediaUrls = urls.filter(isSupportedMediaUrl);
+    const mediaUrls = urls.filter(isSupportedMediaCandidateUrl);
     if (urls.length > 0) {
       const preview = message.replace(/\s+/g, " ").slice(0, 200);
       console.log(`[chat] message channel=${login} author=${authorName} self=${self} urls=${urls.length} media=${mediaUrls.length} text=${JSON.stringify(preview)}`);
@@ -495,7 +496,7 @@ export async function ingestChatMessage(input: {
   }
 
   const skipTelegramPublic = input.skipTelegramPublic === true || hasSkipTelegramPublicTag(input.messageText);
-  const urls = extractUrls(skipTelegramPublic ? stripSkipTelegramPublicTag(input.messageText) : input.messageText).filter(isSupportedMediaUrl);
+  const urls = extractUrls(skipTelegramPublic ? stripSkipTelegramPublicTag(input.messageText) : input.messageText).filter(isSupportedMediaCandidateUrl);
   if (urls.length === 0) return;
 
   const streamer = await prisma.streamer.findUnique({ where: { login: input.streamerLogin } });
@@ -510,7 +511,9 @@ export async function ingestChatMessage(input: {
     return;
   }
 
-  for (const rawUrl of urls) {
+  for (const candidateUrl of urls) {
+    const rawUrl = await resolveSupportedMediaUrl(candidateUrl);
+    if (!rawUrl) continue;
     const normalizedUrl = normalizeUrl(rawUrl);
     if (!normalizedUrl) continue;
     console.log(`[chat] media-url author=${input.authorName} url=${rawUrl} normalized=${normalizedUrl}`);

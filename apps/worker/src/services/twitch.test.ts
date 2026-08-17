@@ -145,6 +145,7 @@ describe("twitch media ingestion", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();
+    envMock.ALLOW_PRIVATE_MEDIA_HOSTS = false;
   });
 
   it("stores the public Telegram skip flag with the media post", async () => {
@@ -168,6 +169,48 @@ describe("twitch media ingestion", () => {
 
     expect(prismaMock.chatPost.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ skipTelegramPublic: true }) }),
+    );
+  });
+
+  it("resolves clck.su short links before queueing media", async () => {
+    const { ingestChatMessage } = await import("./twitch.js");
+    const resolvedUrl = "https://cdn.discordapp.com/attachments/1/2/image.png?ex=1&hm=2";
+    envMock.ALLOW_PRIVATE_MEDIA_HOSTS = true;
+    global.fetch = vi.fn(async () =>
+      new Response(`<script>window.location.href = "${resolvedUrl}&amp;";</script>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    ) as typeof fetch;
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.blockedMedia.findUnique.mockResolvedValue(null);
+    prismaMock.asset.findUnique.mockResolvedValue(null);
+    prismaMock.chatPost.create.mockResolvedValue({ id: "post-1" });
+    prismaMock.asset.upsert.mockResolvedValue({ id: "asset-1" });
+    prismaMock.downloadJob.findFirst.mockResolvedValue(null);
+    prismaMock.downloadJob.create.mockResolvedValue({});
+
+    await ingestChatMessage({
+      streamerLogin: "streamer",
+      twitchMessageId: "message-1",
+      authorName: "Viewer",
+      messageText: "look https://clck.su/pvnpm",
+      postedAt: new Date("2026-06-12T10:04:00Z"),
+    });
+
+    expect(prismaMock.chatPost.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          originalUrl: `${resolvedUrl}&`,
+          normalizedUrl: "https://cdn.discordapp.com/attachments/1/2/image.png",
+        }),
+      }),
+    );
+    expect(prismaMock.downloadJob.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ url: `${resolvedUrl}&` }),
+      }),
     );
   });
 });
