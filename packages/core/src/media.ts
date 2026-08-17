@@ -10,6 +10,7 @@ export const ALLOWED_MEDIA_HOSTS = new Set([
   "ibb.co",
 ]);
 export const PLATFORM_MEDIA_HOSTS = new Set(["www.tiktok.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"]);
+export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc"]);
 
 export const DEFAULT_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
@@ -75,7 +76,16 @@ export function mediaTypeFromUrl(rawUrl: string): MediaType {
 }
 
 export function isSupportedMediaUrl(rawUrl: string): boolean {
-  return mediaTypeFromUrl(rawUrl) !== "other" || isPlatformMediaUrl(rawUrl);
+  return mediaTypeFromUrl(rawUrl) !== "other" || isPlatformMediaUrl(rawUrl) || isPostimagePageUrl(rawUrl);
+}
+
+export function isPostimagePageUrl(rawUrl: string): boolean {
+  const url = toUrl(rawUrl);
+  if (!url) return false;
+  const hostname = url.hostname.toLowerCase();
+  if (!MEDIA_PAGE_HOSTS.has(hostname)) return false;
+  const segments = url.pathname.split("/").filter(Boolean);
+  return segments.length === 1 && segments[0] !== "gallery";
 }
 
 export function isPlatformMediaUrl(rawUrl: string): boolean {

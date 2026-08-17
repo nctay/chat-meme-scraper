@@ -12,6 +12,7 @@ import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
 import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-download.js";
 import { publishStoredTelegramMedia } from "./telegram-storage.js";
+import { extractPostimageDirectImageUrl, isResolvableMediaPageUrl } from "./media-page-resolver.js";
 
 type DownloadResult = {
   filePath: string;
@@ -276,6 +277,7 @@ async function downloadMedia(rawUrl: string): Promise<DownloadResult> {
 async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
   let url = toUrl(rawUrl);
   if (!url) throw new Error("Invalid media URL");
+  url = await resolveMediaPageUrl(url);
 
   for (let redirects = 0; redirects <= 4; redirects += 1) {
     await assertSafeNetworkTarget(url);
@@ -331,6 +333,32 @@ async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
   }
 
   throw new Error("Too many redirects");
+}
+
+async function resolveMediaPageUrl(url: URL): Promise<URL> {
+  if (!isResolvableMediaPageUrl(url.toString())) return url;
+
+  let pageUrl = url;
+  for (let redirects = 0; redirects <= 4; redirects += 1) {
+    await assertSafeNetworkTarget(pageUrl);
+    const response = await fetch(pageUrl, {
+      redirect: "manual",
+      headers: { accept: "text/html,application/xhtml+xml" },
+    });
+    if (isRedirect(response.status)) {
+      pageUrl = redirectUrl(pageUrl, response);
+      continue;
+    }
+    if (!response.ok) throw new Error(`Postimages page failed with ${response.status}`);
+
+    const imageUrl = extractPostimageDirectImageUrl(await response.text(), pageUrl);
+    if (!imageUrl) throw new Error("Postimages direct image not found");
+    await assertSafeNetworkTarget(imageUrl);
+    console.log(`[resolver] postimg page=${url.toString()} image=${imageUrl.toString()}`);
+    return imageUrl;
+  }
+
+  throw new Error("Too many Postimages redirects");
 }
 
 async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {

@@ -24,6 +24,13 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://www.youtube.com/watch?v=abc123")).toBe(false);
   });
 
+  it("detects supported Postimages page URLs", () => {
+    expect(isSupportedMediaUrl("https://postimg.cc/Z0s0qgxY")).toBe(true);
+    expect(isSupportedMediaUrl("https://postimg.cc/2VfXX46j")).toBe(true);
+    expect(mediaTypeFromUrl("https://postimg.cc/Z0s0qgxY")).toBe("other");
+    expect(isSupportedMediaUrl("https://postimg.cc/gallery/abc")).toBe(false);
+  });
+
   it("detects signed Discord CDN image URLs", () => {
     const url =
       "https://cdn.discordapp.com/attachments/1506760976450584768/1507052247148658852/image.png?ex=6a107f47&is=6a0f2dc7&hm=d010d91051a0ae08e179d86a13eca6e3aa35bd56b97db01cfe7a3c81f24dcd86&";
