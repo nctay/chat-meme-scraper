@@ -139,7 +139,7 @@ async function processOneJob(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const currentAttempts = job.attempts;
     const retry = currentAttempts < 3;
-    await prisma.downloadJob.update({
+    const jobUpdate = prisma.downloadJob.update({
       where: { id: job.id },
       data: {
         status: retry ? "pending" : "failed",
@@ -147,9 +147,22 @@ async function processOneJob(): Promise<void> {
         nextRetryAt: retry ? new Date(Date.now() + 60_000 * currentAttempts) : null,
       },
     });
-    if (!retry) {
-      await prisma.chatPost.update({ where: { id: job.chatPostId }, data: { status: "failed" } });
-    }
+    await (retry
+      ? jobUpdate
+      : prisma.$transaction([
+          jobUpdate,
+          prisma.chatPost.updateMany({
+            where: {
+              status: "pending",
+              OR: [{ id: job.chatPostId }, { normalizedUrl: job.chatPost.normalizedUrl }],
+            },
+            data: { status: "failed" },
+          }),
+          prisma.asset.updateMany({
+            where: { id: job.assetId ?? "", status: "pending" },
+            data: { status: "failed" },
+          }),
+        ]));
     console.error(`[download] failed job=${job.id} asset=${job.assetId ?? "none"} attempts=${currentAttempts} retry=${retry} error=${message}`);
   }
 }
