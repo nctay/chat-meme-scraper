@@ -14,6 +14,7 @@ const adminBot = new Bot(env.TELEGRAM_BOT_TOKEN);
 bots.push(adminBot);
 
 adminBot.use(async (ctx, next) => {
+  if (ctx.chat?.type === "channel") return;
   const userId = ctx.from?.id;
   if (!userId || !allowedUserIds.has(userId)) {
     await ctx.reply("Доступ закрыт.");
