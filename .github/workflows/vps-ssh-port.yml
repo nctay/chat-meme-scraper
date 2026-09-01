@@ -1,0 +1,43 @@
+name: VPS SSH alternate port
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable SSH on port 2222
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          password: ${{ secrets.VPS_ROOT_PASSWORD }}
+          command_timeout: 2m
+          script: |
+            set -eu
+
+            config=/etc/ssh/sshd_config.d/99-alternate-port.conf
+            temp=$(mktemp)
+            trap 'rm -f "$temp"' EXIT
+            printf 'Port 22\nPort 2222\n' > "$temp"
+            install -m 0644 "$temp" "$config"
+
+            if ! sshd -t; then
+              rm -f "$config"
+              sshd -t
+              exit 1
+            fi
+
+            ufw allow 2222/tcp comment 'OpenSSH alternate'
+            systemctl daemon-reload
+            systemctl restart ssh.socket
+
+            echo '=== SSH ports ==='
+            sshd -T | grep '^port '
+            ss -lntp | grep -E ':22 |:2222 '
+            echo '=== UFW ==='
+            ufw status | grep -E '22/tcp|2222/tcp'
