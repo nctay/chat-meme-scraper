@@ -1,4 +1,4 @@
-name: VPS SSH alternate port
+name: VPS SSH hardening
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
   configure:
     runs-on: ubuntu-latest
     steps:
-      - name: Enable SSH on port 2222
+      - name: Configure SSH ports and fail2ban
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -41,3 +41,24 @@ jobs:
             ss -lntp | grep -E ':22 |:2222 '
             echo '=== UFW ==='
             ufw status | grep -E '22/tcp|2222/tcp'
+
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y fail2ban
+
+            printf '%s\n' \
+              '[sshd]' \
+              'enabled = true' \
+              'port = 22,2222' \
+              'backend = systemd' \
+              'maxretry = 5' \
+              'findtime = 10m' \
+              'bantime = 1h' \
+              > /etc/fail2ban/jail.d/sshd.local
+
+            fail2ban-client -t
+            systemctl enable fail2ban
+            systemctl restart fail2ban
+
+            echo '=== Fail2ban ==='
+            fail2ban-client status sshd
