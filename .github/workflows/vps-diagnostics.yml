@@ -14,8 +14,8 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          username: root
+          password: ${{ secrets.VPS_ROOT_PASSWORD }}
           command_timeout: 2m
           script: |
             set -u
@@ -35,30 +35,26 @@ jobs:
             ip route get 5.165.104.81 || true
             ip route get 213.239.157.69 || true
 
-            if sudo -n true 2>/dev/null; then
-              echo '=== UFW ==='
-              sudo -n ufw status verbose || true
+            echo '=== UFW ==='
+            ufw status verbose || true
 
-              echo '=== Firewall rules relevant to SSH ==='
-              sudo -n nft list ruleset 2>/dev/null \
-                | grep -Ei 'drop|reject|dport (22|ssh)|5\.165\.104\.81|213\.239\.157\.69' \
-                || true
+            echo '=== Firewall rules relevant to SSH ==='
+            nft list ruleset 2>/dev/null \
+              | grep -Ei 'drop|reject|dport (22|ssh)|5\.165\.104\.81|213\.239\.157\.69' \
+              || true
 
-              echo '=== Recent SSH and firewall logs ==='
-              sudo -n journalctl -u ssh --since '-24 hours' --no-pager \
-                | grep -E '5\.165\.104\.81|213\.239\.157\.69|Failed|Invalid|Accepted|refused|error' \
-                | tail -n 200 \
-                || true
-              sudo -n journalctl -k --since '-24 hours' --no-pager \
-                | grep -Ei 'UFW|DROP|REJECT|5\.165\.104\.81|213\.239\.157\.69' \
-                | tail -n 200 \
-                || true
+            echo '=== Recent SSH and firewall logs ==='
+            journalctl -u ssh --since '-24 hours' --no-pager \
+              | grep -E '5\.165\.104\.81|213\.239\.157\.69|Failed|Invalid|Accepted|refused|error' \
+              | tail -n 200 \
+              || true
+            journalctl -k --since '-24 hours' --no-pager \
+              | grep -Ei 'UFW|DROP|REJECT|5\.165\.104\.81|213\.239\.157\.69' \
+              | tail -n 200 \
+              || true
 
-              echo '=== Fail2ban ==='
-              sudo -n fail2ban-client status sshd 2>/dev/null || echo 'not installed or inactive'
-            else
-              echo '=== Root diagnostics unavailable: deploy has no passwordless sudo ==='
-            fi
+            echo '=== Fail2ban ==='
+            fail2ban-client status sshd 2>/dev/null || echo 'not installed or inactive'
 
             echo '=== Docker ==='
             docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
