@@ -1,0 +1,62 @@
+name: VPS command
+
+run-name: VPS command as ${{ inputs.user }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      user:
+        description: SSH user
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - root
+      command:
+        description: Command is visible in Actions logs; do not paste secrets
+        required: true
+        default: docker compose -f docker-compose.prod.yml ps
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-command
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.user == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run command as deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            set -eu
+            cd "${{ secrets.VPS_APP_DIR || '/srv/chat-meme-scraper' }}"
+            ${{ inputs.command }}
+
+  root:
+    if: inputs.user == 'root'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run command as root
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          password: ${{ secrets.VPS_ROOT_PASSWORD }}
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            set -eu
+            cd "${{ secrets.VPS_APP_DIR || '/srv/chat-meme-scraper' }}"
+            ${{ inputs.command }}
