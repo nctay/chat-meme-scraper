@@ -17,7 +17,7 @@ async function tick(): Promise<void> {
 async function loop(): Promise<void> {
   while (!shuttingDown) {
     await tick();
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
 }
 
