@@ -1,6 +1,6 @@
 import { extractUrls } from "@archive/core";
 import { prisma } from "../prisma.js";
-import { env, wtvChannels } from "../env.js";
+import { wtvChannels } from "../env.js";
 import { ingestChatMessage } from "./twitch.js";
 import { isWithinOfflineGrace, offlineGraceMs } from "./stream-grace.js";
 import { isSupportedMediaCandidateUrl } from "./redirect-resolver.js";
@@ -210,7 +210,6 @@ async function fetchWtvJson<T>(url: string, refererChannel: string, query: Recor
       origin: "https://w.tv",
       referer: `https://w.tv/${refererChannel}/`,
       "user-agent": wtvUserAgent,
-      ...(env.WTV_COOKIE ? { cookie: env.WTV_COOKIE } : {}),
     },
   });
 
