@@ -87,6 +87,7 @@ async function processOneJob(): Promise<void> {
           messageText: job.chatPost.messageText,
           skipTelegramPublic: job.chatPost.skipTelegramPublic,
           telegramSendAsAnimation: downloaded.telegramSendAsAnimation,
+          telegramHasSpoiler: job.chatPost.rawTwitchMessageId?.startsWith("wtv:"),
         });
 
         const asset = await prisma.asset.upsert({

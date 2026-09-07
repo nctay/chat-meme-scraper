@@ -36,14 +36,14 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
   const message = await storageSendLimiter.schedule<Message.PhotoMessage | Message.VideoMessage | Message.AnimationMessage>(async () => {
     if (isGif(mimeType) || metadata.telegramSendAsAnimation) {
       console.log(`[telegram] sendAnimation mime=${mimeType} file=${path.basename(filePath)}`);
-      return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, ...videoMetadata });
+      return telegramBot().api.sendAnimation(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, has_spoiler: metadata.telegramHasSpoiler, ...videoMetadata });
     }
     if (mediaType === "image") {
       console.log(`[telegram] sendPhoto mime=${mimeType} file=${path.basename(filePath)}`);
-      return telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption });
+      return telegramBot().api.sendPhoto(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, has_spoiler: metadata.telegramHasSpoiler });
     }
     console.log(`[telegram] sendVideo mime=${mimeType} file=${path.basename(filePath)} width=${videoMetadata.width ?? "unknown"} height=${videoMetadata.height ?? "unknown"}`);
-    return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, supports_streaming: true, ...videoMetadata });
+    return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, has_spoiler: metadata.telegramHasSpoiler, supports_streaming: true, ...videoMetadata });
   });
   const file = "photo" in message ? message.photo.at(-1) : "video" in message ? message.video : message.animation;
   if (!file) throw new Error("Telegram did not return stored file metadata");
