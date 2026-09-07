@@ -172,7 +172,7 @@ describe("twitch media ingestion", () => {
     );
   });
 
-  it("resolves clck.su short links before queueing media", async () => {
+  it.each(["clck.su", "bit.ly", "tinyurl.com", "clck.ru"])("resolves %s short links before queueing media", async (host) => {
     const { ingestChatMessage } = await import("./twitch.js");
     const resolvedUrl = "https://cdn.discordapp.com/attachments/1/2/image.png?ex=1&hm=2";
     envMock.ALLOW_PRIVATE_MEDIA_HOSTS = true;
@@ -195,7 +195,7 @@ describe("twitch media ingestion", () => {
       streamerLogin: "streamer",
       twitchMessageId: "message-1",
       authorName: "Viewer",
-      messageText: "look https://clck.su/pvnpm",
+      messageText: `look https://${host}/pvnpm`,
       postedAt: new Date("2026-06-12T10:04:00Z"),
     });
 

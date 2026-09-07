@@ -2,7 +2,7 @@ import dns from "node:dns/promises";
 import { assertSafeResolvedAddress, assertSafeUrl, extractUrls, isSupportedMediaUrl, toUrl } from "@archive/core";
 import { env } from "../env.js";
 
-const shortLinkHosts = new Set(["clck.su", "www.clck.su"]);
+const shortLinkHosts = new Set(["clck.su", "www.clck.su", "bit.ly", "www.bit.ly", "tinyurl.com", "www.tinyurl.com", "clck.ru", "www.clck.ru"]);
 
 export function isSupportedMediaCandidateUrl(rawUrl: string): boolean {
   return isSupportedMediaUrl(rawUrl) || isShortLinkUrl(rawUrl);
