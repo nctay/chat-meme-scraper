@@ -176,11 +176,10 @@ describe("twitch media ingestion", () => {
     const { ingestChatMessage } = await import("./twitch.js");
     const resolvedUrl = "https://cdn.discordapp.com/attachments/1/2/image.png?ex=1&hm=2";
     envMock.ALLOW_PRIVATE_MEDIA_HOSTS = true;
-    global.fetch = vi.fn(async () =>
-      new Response(`<script>window.location.href = "${resolvedUrl}&amp;";</script>`, {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
+    global.fetch = vi.fn(async (input) =>
+      String(input).includes(host)
+        ? new Response(null, { status: 302, headers: { location: resolvedUrl } })
+        : new Response("image", { status: 200, headers: { "content-type": "image/png" } }),
     ) as typeof fetch;
     prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
     prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
@@ -202,14 +201,14 @@ describe("twitch media ingestion", () => {
     expect(prismaMock.chatPost.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          originalUrl: `${resolvedUrl}&`,
+          originalUrl: resolvedUrl,
           normalizedUrl: "https://cdn.discordapp.com/attachments/1/2/image.png",
         }),
       }),
     );
     expect(prismaMock.downloadJob.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ url: `${resolvedUrl}&` }),
+        data: expect.objectContaining({ url: resolvedUrl }),
       }),
     );
   });

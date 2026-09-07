@@ -47,6 +47,7 @@ async function resolveShortLink(rawUrl: string): Promise<URL | null> {
       continue;
     }
     if (!response.ok) throw new Error(`Short link failed with ${response.status}`);
+    if (isSupportedMediaUrl(url.toString())) return url;
 
     return extractHtmlRedirectUrl(await response.text(), url);
   }
