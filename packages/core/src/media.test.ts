@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractUrls, isAnimatedWebp, isSupportedMediaUrl, mediaTypeFromUrl, normalizeUrl } from "./media.js";
+import { extractUrls, isAnimatedWebp, isPlatformMediaUrl, isSupportedMediaUrl, mediaTypeFromUrl, normalizeUrl } from "./media.js";
 import { shouldStartNewSession } from "./stream-sessions.js";
 
 describe("media helpers", () => {
@@ -29,6 +29,25 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://postimg.cc/2VfXX46j")).toBe(true);
     expect(mediaTypeFromUrl("https://postimg.cc/Z0s0qgxY")).toBe("other");
     expect(isSupportedMediaUrl("https://postimg.cc/gallery/abc")).toBe(false);
+  });
+
+  it("routes Twitch clips to the platform downloader and deduplicates URL variants", () => {
+    const slug = "DaintyUninterestedCroquetteYouWHY-qeA25bWxkzdRS1Wf";
+    const canonical = `https://clips.twitch.tv/${slug}`;
+    for (const url of [canonical, `${canonical}/?tt_content=url&tt_medium=clips_api`,
+      `https://www.twitch.tv/ahmad153/clip/${slug}?filter=clips&range=7d`,
+      `https://twitch.tv/ahmad153/clip/${slug}`, `https://m.twitch.tv/ahmad153/clip/${slug}#foo`]) {
+      expect(isSupportedMediaUrl(url)).toBe(true);
+      expect(isPlatformMediaUrl(url)).toBe(true);
+      expect(normalizeUrl(url)).toBe(canonical);
+    }
+    for (const url of ["https://www.twitch.tv/ahmad153", "https://www.twitch.tv/videos/123",
+      "https://www.twitch.tv/ahmad153/clips", "https://www.twitch.tv/ahmad153/clip/",
+      "https://clips.twitch.tv/", `https://twitch.tv.evil.com/ahmad153/clip/${slug}`]) {
+      expect(isSupportedMediaUrl(url)).toBe(false);
+      expect(isPlatformMediaUrl(url)).toBe(false);
+      expect(normalizeUrl(url)).toBe(url);
+    }
   });
 
   it("detects signed Discord CDN image URLs", () => {

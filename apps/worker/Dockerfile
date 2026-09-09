@@ -21,7 +21,10 @@ RUN pnpm --filter worker build
 
 FROM base AS runtime
 ENV NODE_ENV=production
-RUN apk add --no-cache ffmpeg imagemagick yt-dlp
+RUN apk add --no-cache ffmpeg imagemagick python3 py3-pip \
+    && python3 -m venv /opt/yt-dlp \
+    && /opt/yt-dlp/bin/pip install --no-cache-dir 'yt-dlp==2026.8.30.232658.dev0'
+ENV PATH="/opt/yt-dlp/bin:${PATH}"
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/prisma ./prisma

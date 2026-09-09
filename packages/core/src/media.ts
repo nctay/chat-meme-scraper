@@ -43,6 +43,9 @@ export function normalizeUrl(rawUrl: string): string | null {
   url.hash = "";
   url.hostname = url.hostname.toLowerCase();
 
+  const twitchClipId = getTwitchClipId(url);
+  if (twitchClipId) return `https://clips.twitch.tv/${twitchClipId}`;
+
   if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) {
     url.port = "";
   }
@@ -91,6 +94,7 @@ export function isPostimagePageUrl(rawUrl: string): boolean {
 export function isPlatformMediaUrl(rawUrl: string): boolean {
   const url = toUrl(rawUrl);
   if (!url) return false;
+  if (getTwitchClipId(url)) return true;
   const hostname = url.hostname.toLowerCase();
   if (!PLATFORM_MEDIA_HOSTS.has(hostname)) return false;
 
@@ -98,6 +102,16 @@ export function isPlatformMediaUrl(rawUrl: string): boolean {
   if (hostname.endsWith("youtube.com")) return url.pathname.startsWith("/shorts/");
   if (hostname.endsWith("tiktok.com")) return url.pathname.length > 1;
   return false;
+}
+
+function getTwitchClipId(url: URL): string | null {
+  if (url.hostname === "clips.twitch.tv") {
+    return url.pathname.match(/^\/([A-Za-z0-9_-]+)\/?$/)?.[1] ?? null;
+  }
+  if (["twitch.tv", "www.twitch.tv", "m.twitch.tv"].includes(url.hostname)) {
+    return url.pathname.match(/^\/[A-Za-z0-9_]+\/clip\/([A-Za-z0-9_-]+)\/?$/)?.[1] ?? null;
+  }
+  return null;
 }
 
 export function mediaTypeFromContentType(contentType: string | null | undefined): MediaType {
