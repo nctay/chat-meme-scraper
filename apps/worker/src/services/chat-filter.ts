@@ -1,7 +1,7 @@
 const ignoredChatAuthors = new Set(["nightbot", "streamelements"]);
 
 export function isIgnoredChatCommand(messageText: string): boolean {
-  return /^!sr(?:\s|$)/i.test(messageText.trim());
+  return /^!sr(?:\s|$)/i.test(messageText.trim()) || /(?:^|\s)catAsk(?=\s|$)/i.test(messageText);
 }
 
 export function isIgnoredChatAuthor(authorName: string): boolean {

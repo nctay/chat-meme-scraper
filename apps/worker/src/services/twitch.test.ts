@@ -130,6 +130,17 @@ describe("twitch chat command filtering", () => {
     expect(isIgnoredChatAuthor("RealViewer")).toBe(false);
   });
 
+  it("ignores standalone catAsk anywhere in a message", () => {
+    for (const message of ["catAsk", "catAsk https://youtu.be/abc", "https://youtu.be/abc catAsk",
+      "@ahmad153 catAsk https://youtu.be/JAlQx4H9c5M?si=ZbE2TXACmT7kEPQ6", "look\nCATASK\tplease"]) {
+      expect(isIgnoredChatCommand(message)).toBe(true);
+    }
+    for (const message of ["catAsking https://youtu.be/abc", "mycatAsk https://youtu.be/abc",
+      "https://example.com/catAsk", "https://example.com/?q=catAsk"]) {
+      expect(isIgnoredChatCommand(message)).toBe(false);
+    }
+  });
+
   it("recognizes and removes the public Telegram skip tag", () => {
     expect(hasSkipTelegramPublicTag("look https://example.com/a.jpg !skip_tg now")).toBe(true);
     expect(hasSkipTelegramPublicTag("!skip_tghttps://example.com/a.jpg")).toBe(true);
