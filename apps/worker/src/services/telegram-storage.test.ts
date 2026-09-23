@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const apiMock = vi.hoisted(() => ({ sendPhoto: vi.fn(), copyMessage: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ sendPhoto: vi.fn(), sendVideo: vi.fn(), sendAnimation: vi.fn(), copyMessage: vi.fn() }));
 const prismaMock = vi.hoisted(() => ({ asset: { updateMany: vi.fn() } }));
 
 vi.mock("grammy", () => ({
@@ -70,6 +70,11 @@ describe("Telegram media spoilers", () => {
         visibility: "hidden",
         telegramChatId: "-100storage",
         telegramMessageId: 1,
+        telegramFileId: "file",
+        telegramIsAnimation: false,
+        publicHasSpoiler: false,
+        mimeType: "image/jpeg",
+        mediaType: "image",
         publicTelegramChatId: null,
         publicTelegramMessageId: null,
       },
@@ -82,6 +87,40 @@ describe("Telegram media spoilers", () => {
       },
     );
 
+    expect(apiMock.copyMessage).not.toHaveBeenCalled();
+  });
+
+  it("resends a public photo by file_id with a spoiler", async () => {
+    const { publishStoredTelegramMedia } = await import("./telegram-storage.js");
+
+    await publishStoredTelegramMedia(
+      {
+        id: "asset",
+        visibility: "public",
+        telegramChatId: "-100storage",
+        telegramMessageId: 1,
+        telegramFileId: "file",
+        telegramIsAnimation: false,
+        publicHasSpoiler: true,
+        mimeType: "image/png",
+        mediaType: "image",
+        publicTelegramChatId: null,
+        publicTelegramMessageId: null,
+      },
+      {
+        streamerLogin: "streamer",
+        streamStartedAt: new Date("2026-09-07T18:00:00Z"),
+        authorName: "Viewer",
+        messageText: "https://example.com/image.png",
+        skipTelegramPublic: false,
+      },
+    );
+
+    expect(apiMock.sendPhoto).toHaveBeenCalledWith(
+      "-100public",
+      "file",
+      expect.objectContaining({ has_spoiler: true }),
+    );
     expect(apiMock.copyMessage).not.toHaveBeenCalled();
   });
 });

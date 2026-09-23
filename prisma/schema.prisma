@@ -179,6 +179,8 @@ model Asset {
   telegramFileUniqueId String?
   publicTelegramChatId String?
   publicTelegramMessageId Int?
+  publicHasSpoiler     Boolean         @default(false)
+  telegramIsAnimation  Boolean         @default(false)
   s3Key                String?
   publicUrl            String?
   mimeType             String?

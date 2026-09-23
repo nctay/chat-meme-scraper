@@ -80,7 +80,7 @@ async function processOneJob(): Promise<void> {
           downloaded.mediaType === "video" || downloaded.mimeType === "image/gif" || Boolean(downloaded.telegramSendAsAnimation),
         );
         console.log(
-          `[nsfw] asset=${assetId} status=${moderation.status} class=${moderation.className ?? "none"} score=${moderation.score?.toFixed(4) ?? "none"} public=${!moderation.blockPublic}`,
+          `[nsfw] asset=${assetId} status=${moderation.status} class=${moderation.className ?? "none"} score=${moderation.score?.toFixed(4) ?? "none"} public_spoiler=${moderation.publicSpoiler}`,
         );
         const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
           originalUrl: job.url,
@@ -95,7 +95,7 @@ async function processOneJob(): Promise<void> {
           messageText: job.chatPost.messageText,
           skipTelegramPublic: job.chatPost.skipTelegramPublic,
           telegramSendAsAnimation: downloaded.telegramSendAsAnimation,
-          telegramHasSpoiler: moderation.blockPublic || job.chatPost.rawTwitchMessageId?.startsWith("wtv:"),
+          telegramHasSpoiler: job.chatPost.rawTwitchMessageId?.startsWith("wtv:"),
         });
 
         const asset = await prisma.asset.upsert({
@@ -112,13 +112,15 @@ async function processOneJob(): Promise<void> {
             telegramFileUniqueId: stored.telegramFileUniqueId,
             publicTelegramChatId: null,
             publicTelegramMessageId: null,
+            publicHasSpoiler: moderation.publicSpoiler,
+            telegramIsAnimation: Boolean(downloaded.telegramSendAsAnimation) || downloaded.mimeType === "image/gif",
             s3Key: stored.s3Key,
             publicUrl: stored.publicUrl,
             mimeType: downloaded.mimeType,
             byteSize: downloaded.byteSize,
             mediaType: downloaded.mediaType,
             status: "stored",
-            visibility: moderation.blockPublic ? "hidden" : "public",
+            visibility: "public",
           },
           update: {
             sha256: downloaded.sha256,
@@ -127,13 +129,15 @@ async function processOneJob(): Promise<void> {
             telegramMessageId: stored.telegramMessageId,
             telegramFileId: stored.telegramFileId,
             telegramFileUniqueId: stored.telegramFileUniqueId,
+            publicHasSpoiler: moderation.publicSpoiler,
+            telegramIsAnimation: Boolean(downloaded.telegramSendAsAnimation) || downloaded.mimeType === "image/gif",
             s3Key: stored.s3Key,
             publicUrl: stored.publicUrl,
             mimeType: downloaded.mimeType,
             byteSize: downloaded.byteSize,
             mediaType: downloaded.mediaType,
             status: "stored",
-            visibility: moderation.blockPublic ? "hidden" : "public",
+            visibility: "public",
           },
         });
 

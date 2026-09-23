@@ -11,14 +11,14 @@ const hardClasses = new Set(["Porn", "Hentai"]);
 type Prediction = { className: string; probability: number };
 
 export type NsfwResult = {
-  blockPublic: boolean;
+  publicSpoiler: boolean;
   className?: string;
   score?: number;
   status: "disabled" | "ok" | "error";
 };
 
 export async function classifyNsfw(filePath: string, animated: boolean): Promise<NsfwResult> {
-  if (!env.NSFW_CLASSIFIER_URL) return { blockPublic: false, status: "disabled" };
+  if (!env.NSFW_CLASSIFIER_URL) return { publicSpoiler: false, status: "disabled" };
 
   const frameDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-nsfw-"));
   try {
@@ -43,14 +43,14 @@ export async function classifyNsfw(filePath: string, animated: boolean): Promise
 
     const score = highest?.probability ?? 0;
     return {
-      blockPublic: score >= env.NSFW_BLOCK_THRESHOLD,
+      publicSpoiler: score >= env.NSFW_SPOILER_THRESHOLD,
       className: highest?.className,
       score,
       status: "ok",
     };
   } catch (error) {
-    console.error(`[nsfw] classification failed; hiding from public channel error=${error instanceof Error ? error.message : String(error)}`);
-    return { blockPublic: true, status: "error" };
+    console.error(`[nsfw] classification failed; enabling public spoiler error=${error instanceof Error ? error.message : String(error)}`);
+    return { publicSpoiler: true, status: "error" };
   } finally {
     await fs.promises.rm(frameDir, { force: true, recursive: true }).catch(() => undefined);
   }

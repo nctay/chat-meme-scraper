@@ -14,6 +14,16 @@ const storageSendLimiter = new SerialRateLimiter(1100);
 const publicChannelSendLimiter = new SerialRateLimiter(1100);
 const deletedChannelSendLimiter = new SerialRateLimiter(1100);
 
+type TelegramStoredAsset = {
+  telegramChatId: string | null;
+  telegramMessageId: number | null;
+  telegramFileId: string | null;
+  telegramIsAnimation: boolean;
+  publicHasSpoiler: boolean;
+  mimeType: string | null;
+  mediaType: string;
+};
+
 function telegramBot(): Bot {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   bot ??= new Bot(env.TELEGRAM_BOT_TOKEN);
@@ -58,7 +68,12 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
 }
 
 export async function publishStoredTelegramMedia(
-  asset: { id: string; visibility: "public" | "hidden"; telegramChatId: string | null; telegramMessageId: number | null; publicTelegramChatId: string | null; publicTelegramMessageId: number | null },
+  asset: TelegramStoredAsset & {
+    id: string;
+    visibility: "public" | "hidden";
+    publicTelegramChatId: string | null;
+    publicTelegramMessageId: number | null;
+  },
   metadata: PublicTelegramMediaMetadata,
 ): Promise<void> {
   if (!asset.telegramChatId || !asset.telegramMessageId || asset.publicTelegramMessageId) return;
@@ -67,7 +82,7 @@ export async function publishStoredTelegramMedia(
     return;
   }
 
-  const copied = await publishTelegramMedia(asset.telegramChatId, asset.telegramMessageId, metadata);
+  const copied = await publishTelegramMedia(asset, metadata);
   if (!copied) return;
 
   await prisma.asset.updateMany({
@@ -140,7 +155,7 @@ function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-async function publishTelegramMedia(storageChatId: number | string, storageMessageId: number, metadata: PublicTelegramMediaMetadata): Promise<{ telegramChatId: string; telegramMessageId: number } | null> {
+async function publishTelegramMedia(asset: TelegramStoredAsset, metadata: PublicTelegramMediaMetadata): Promise<{ telegramChatId: string; telegramMessageId: number } | null> {
   if (metadata.skipTelegramPublic) {
     console.log(`[telegram] skip public channel user_tag streamer=${metadata.streamerLogin}`);
     return null;
@@ -152,11 +167,23 @@ async function publishTelegramMedia(storageChatId: number | string, storageMessa
   }
 
   const copied = await publicChannelSendLimiter.schedule(() =>
-    telegramBot().api.copyMessage(env.TELEGRAM_PUBLIC_CHANNEL_ID!, storageChatId, storageMessageId, {
-      caption: publicChannelCaption(metadata),
-    }),
+    sendStoredTelegramMedia(env.TELEGRAM_PUBLIC_CHANNEL_ID!, asset, publicChannelCaption(metadata)),
   );
   return { telegramChatId: env.TELEGRAM_PUBLIC_CHANNEL_ID, telegramMessageId: copied.message_id };
+}
+
+async function sendStoredTelegramMedia(chatId: string, asset: TelegramStoredAsset, caption: string): Promise<{ message_id: number }> {
+  if (!asset.publicHasSpoiler) {
+    return telegramBot().api.copyMessage(chatId, asset.telegramChatId!, asset.telegramMessageId!, { caption });
+  }
+  if (!asset.telegramFileId) throw new Error("Stored Telegram media has no file_id for spoiler resend");
+  if (asset.telegramIsAnimation || isGif(asset.mimeType ?? "")) {
+    return telegramBot().api.sendAnimation(chatId, asset.telegramFileId, { caption, has_spoiler: true });
+  }
+  if (asset.mediaType === "image") {
+    return telegramBot().api.sendPhoto(chatId, asset.telegramFileId, { caption, has_spoiler: true });
+  }
+  return telegramBot().api.sendVideo(chatId, asset.telegramFileId, { caption, has_spoiler: true, supports_streaming: true });
 }
 
 export type DeletedChatMessageMetadata = {
@@ -169,12 +196,10 @@ export type DeletedChatMessageMetadata = {
   linkedPosts: Array<{
     normalizedUrl: string;
     assetId: string | null;
-    asset: {
+    asset: (TelegramStoredAsset & {
       status: string;
       visibility: "public" | "hidden";
-      telegramChatId: string | null;
-      telegramMessageId: number | null;
-    } | null;
+    }) | null;
   }>;
 };
 
@@ -192,9 +217,7 @@ export async function publishDeletedChatMessage(metadata: DeletedChatMessageMeta
 
   for (const post of copyablePosts) {
     const copied = await deletedChannelSendLimiter.schedule(() =>
-      telegramBot().api.copyMessage(env.TELEGRAM_DELETED_CHANNEL_ID!, post.asset!.telegramChatId!, post.asset!.telegramMessageId!, {
-        caption: deletedChannelCaption(metadata),
-      }),
+      sendStoredTelegramMedia(env.TELEGRAM_DELETED_CHANNEL_ID!, post.asset!, deletedChannelCaption(metadata)),
     );
     firstMessageId ??= copied.message_id;
   }
