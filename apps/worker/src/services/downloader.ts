@@ -13,6 +13,7 @@ import { storeMedia } from "./storage.js";
 import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-download.js";
 import { publishStoredTelegramMedia } from "./telegram-storage.js";
 import { extractPostimageDirectImageUrl, isResolvableMediaPageUrl } from "./media-page-resolver.js";
+import { classifyNsfw } from "./nsfw.js";
 
 type DownloadResult = {
   filePath: string;
@@ -74,6 +75,13 @@ async function processOneJob(): Promise<void> {
         }
 
         const assetId = existingByUrl?.id ?? crypto.randomUUID();
+        const moderation = await classifyNsfw(
+          downloaded.filePath,
+          downloaded.mediaType === "video" || downloaded.mimeType === "image/gif" || Boolean(downloaded.telegramSendAsAnimation),
+        );
+        console.log(
+          `[nsfw] asset=${assetId} status=${moderation.status} class=${moderation.className ?? "none"} score=${moderation.score?.toFixed(4) ?? "none"} public=${!moderation.blockPublic}`,
+        );
         const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
           originalUrl: job.url,
           normalizedUrl,
@@ -87,7 +95,7 @@ async function processOneJob(): Promise<void> {
           messageText: job.chatPost.messageText,
           skipTelegramPublic: job.chatPost.skipTelegramPublic,
           telegramSendAsAnimation: downloaded.telegramSendAsAnimation,
-          telegramHasSpoiler: job.chatPost.rawTwitchMessageId?.startsWith("wtv:"),
+          telegramHasSpoiler: moderation.blockPublic || job.chatPost.rawTwitchMessageId?.startsWith("wtv:"),
         });
 
         const asset = await prisma.asset.upsert({
@@ -110,7 +118,7 @@ async function processOneJob(): Promise<void> {
             byteSize: downloaded.byteSize,
             mediaType: downloaded.mediaType,
             status: "stored",
-            visibility: "public",
+            visibility: moderation.blockPublic ? "hidden" : "public",
           },
           update: {
             sha256: downloaded.sha256,
@@ -125,7 +133,7 @@ async function processOneJob(): Promise<void> {
             byteSize: downloaded.byteSize,
             mediaType: downloaded.mediaType,
             status: "stored",
-            visibility: "public",
+            visibility: moderation.blockPublic ? "hidden" : "public",
           },
         });
 

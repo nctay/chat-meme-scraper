@@ -24,9 +24,22 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      NSFW_CLASSIFIER_URL: http://nsfw:3333/classify
     depends_on:
       postgres:
         condition: service_healthy
+
+  nsfw:
+    image: andresribeiroo/nsfwjs:3.1@sha256:7e8328d0c858efe1943b229c7aa08a3c9c9563b5f950572fe4ab752b067e1b95
+    restart: unless-stopped
+    cpus: 1
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "deno", "eval", "const r=await fetch('http://localhost:3333/');Deno.exit(r.status===404?0:1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
   bot:
     build:

@@ -263,7 +263,7 @@ describe("twitch EventSub deleted messages", () => {
       {
         normalizedUrl: "https://example.com/a.jpg",
         assetId: "asset-1",
-        asset: { status: "stored", telegramChatId: "-100storage", telegramMessageId: 10 },
+        asset: { status: "stored", visibility: "public", telegramChatId: "-100storage", telegramMessageId: 10 },
       },
     ];
     prismaMock.streamer.findUnique.mockResolvedValue(streamer);
@@ -365,6 +365,33 @@ describe("twitch EventSub deleted messages", () => {
       messageText: "https://example.com/a.jpg !skip_tg",
     });
     prismaMock.chatPost.findMany.mockResolvedValue([]);
+
+    await handleEventSubMessage(chatMessageDeleteEvent());
+
+    expect(publishDeletedChatMessageMock).not.toHaveBeenCalled();
+    expect(prismaMock.deletedChatMessage.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ skipTelegramPublic: true }) }),
+    );
+  });
+
+  it("does not post NSFW-hidden media to the deleted channel", async () => {
+    const { handleEventSubMessage } = await import("./twitch.js");
+    prismaMock.streamer.findUnique.mockResolvedValue({ id: "streamer-1", login: "streamer" });
+    prismaMock.streamSession.findFirst.mockResolvedValue({ id: "session-1", startedAt: new Date("2026-06-12T10:00:00Z") });
+    prismaMock.deletedChatMessage.findUnique.mockResolvedValue(null);
+    prismaMock.deletedChatMessage.create.mockResolvedValue({});
+    prismaMock.deletedChatMessage.update.mockResolvedValue({});
+    prismaMock.twitchChatMessage.findUnique.mockResolvedValue({
+      twitchMessageId: "msg-1",
+      authorName: "Viewer",
+      messageText: "https://example.com/a.jpg",
+    });
+    prismaMock.chatPost.findMany.mockResolvedValue([
+      {
+        skipTelegramPublic: false,
+        asset: { status: "stored", visibility: "hidden", telegramChatId: "-100storage", telegramMessageId: 10 },
+      },
+    ]);
 
     await handleEventSubMessage(chatMessageDeleteEvent());
 

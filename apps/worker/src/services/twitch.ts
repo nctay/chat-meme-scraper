@@ -388,8 +388,8 @@ async function handleChatMessageDeleteEvent(event: EventSubEvent, deletedAt: Dat
   if (!canPublish) return;
 
   const linkedPosts = await findPostsForRawTwitchMessage(session.id, twitchMessageId);
-  if (skipTelegramPublic || linkedPosts.some((post) => post.skipTelegramPublic)) {
-    console.log(`[eventsub] skip deleted message user_tag channel=${login} message=${twitchMessageId}`);
+  if (skipTelegramPublic || linkedPosts.some((post) => post.skipTelegramPublic || post.asset?.visibility === "hidden")) {
+    console.log(`[eventsub] skip deleted message public_suppressed channel=${login} message=${twitchMessageId}`);
     await prisma.deletedChatMessage.update({
       where: { streamerId_twitchMessageId: { streamerId: streamer.id, twitchMessageId } },
       data: { skipTelegramPublic: true },

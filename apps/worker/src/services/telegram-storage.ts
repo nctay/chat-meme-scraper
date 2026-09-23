@@ -58,10 +58,14 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
 }
 
 export async function publishStoredTelegramMedia(
-  asset: { id: string; telegramChatId: string | null; telegramMessageId: number | null; publicTelegramChatId: string | null; publicTelegramMessageId: number | null },
+  asset: { id: string; visibility: "public" | "hidden"; telegramChatId: string | null; telegramMessageId: number | null; publicTelegramChatId: string | null; publicTelegramMessageId: number | null },
   metadata: PublicTelegramMediaMetadata,
 ): Promise<void> {
   if (!asset.telegramChatId || !asset.telegramMessageId || asset.publicTelegramMessageId) return;
+  if (asset.visibility === "hidden") {
+    console.log(`[telegram] skip public channel hidden_asset=${asset.id}`);
+    return;
+  }
 
   const copied = await publishTelegramMedia(asset.telegramChatId, asset.telegramMessageId, metadata);
   if (!copied) return;
@@ -167,6 +171,7 @@ export type DeletedChatMessageMetadata = {
     assetId: string | null;
     asset: {
       status: string;
+      visibility: "public" | "hidden";
       telegramChatId: string | null;
       telegramMessageId: number | null;
     } | null;
@@ -175,8 +180,14 @@ export type DeletedChatMessageMetadata = {
 
 export async function publishDeletedChatMessage(metadata: DeletedChatMessageMetadata): Promise<{ telegramChatId: string; telegramMessageId: number } | null> {
   if (!env.TELEGRAM_DELETED_CHANNEL_ID) return null;
+  if (metadata.linkedPosts.some((post) => post.asset?.visibility === "hidden")) {
+    console.log(`[telegram] skip deleted channel hidden_asset message=${metadata.twitchMessageId}`);
+    return null;
+  }
 
-  const copyablePosts = metadata.linkedPosts.filter((post) => post.asset?.status === "stored" && post.asset.telegramChatId && post.asset.telegramMessageId);
+  const copyablePosts = metadata.linkedPosts.filter(
+    (post) => post.asset?.status === "stored" && post.asset.visibility === "public" && post.asset.telegramChatId && post.asset.telegramMessageId,
+  );
   let firstMessageId: number | null = null;
 
   for (const post of copyablePosts) {

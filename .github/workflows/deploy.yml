@@ -101,8 +101,8 @@ jobs:
               echo "WORKER_IMAGE=$WORKER_IMAGE"
             } >> .env
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-            docker compose -f docker-compose.prod.yml pull worker bot
+            docker compose -f docker-compose.prod.yml pull worker bot nsfw
             docker compose -f docker-compose.prod.yml up -d postgres
             docker compose -f docker-compose.prod.yml run --rm worker pnpm db:migrate
-            docker compose -f docker-compose.prod.yml up -d worker bot
+            docker compose -f docker-compose.prod.yml up -d nsfw worker bot
             docker compose -f docker-compose.prod.yml ps

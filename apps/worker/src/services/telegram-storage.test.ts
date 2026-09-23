@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const apiMock = vi.hoisted(() => ({ sendPhoto: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ sendPhoto: vi.fn(), copyMessage: vi.fn() }));
+const prismaMock = vi.hoisted(() => ({ asset: { updateMany: vi.fn() } }));
 
 vi.mock("grammy", () => ({
   Bot: class {
@@ -10,11 +11,11 @@ vi.mock("grammy", () => ({
 }));
 
 vi.mock("../env.js", () => ({
-  env: { TELEGRAM_BOT_TOKEN: "token", TELEGRAM_STORAGE_CHAT_ID: "-100storage" },
+  env: { TELEGRAM_BOT_TOKEN: "token", TELEGRAM_STORAGE_CHAT_ID: "-100storage", TELEGRAM_PUBLIC_CHANNEL_ID: "-100public" },
   privateStreamerLogins: new Set<string>(),
 }));
 
-vi.mock("../prisma.js", () => ({ prisma: {} }));
+vi.mock("../prisma.js", () => ({ prisma: prismaMock }));
 
 vi.mock("./rate-limit.js", () => ({
   SerialRateLimiter: class {
@@ -58,5 +59,29 @@ describe("Telegram media spoilers", () => {
       expect.anything(),
       expect.objectContaining({ has_spoiler: true }),
     );
+  });
+
+  it("does not publish hidden assets", async () => {
+    const { publishStoredTelegramMedia } = await import("./telegram-storage.js");
+
+    await publishStoredTelegramMedia(
+      {
+        id: "asset",
+        visibility: "hidden",
+        telegramChatId: "-100storage",
+        telegramMessageId: 1,
+        publicTelegramChatId: null,
+        publicTelegramMessageId: null,
+      },
+      {
+        streamerLogin: "streamer",
+        streamStartedAt: new Date("2026-09-07T18:00:00Z"),
+        authorName: "Viewer",
+        messageText: "https://example.com/image.jpg",
+        skipTelegramPublic: false,
+      },
+    );
+
+    expect(apiMock.copyMessage).not.toHaveBeenCalled();
   });
 });
