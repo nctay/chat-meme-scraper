@@ -61,6 +61,32 @@ describe("Telegram media spoilers", () => {
     );
   });
 
+  it("accepts a GIF that Telegram stored as a document", async () => {
+    apiMock.sendAnimation.mockResolvedValue({
+      chat: { id: -100 },
+      message_id: 2,
+      document: { file_id: "document-file", file_unique_id: "document-unique" },
+    });
+    const { storeTelegramMedia } = await import("./telegram-storage.js");
+
+    const stored = await storeTelegramMedia("/dev/null", "image/gif", "image", {
+      originalUrl: "https://example.com/image.gif",
+      normalizedUrl: "https://example.com/image.gif",
+      sha256: "hash",
+      streamerLogin: "streamer",
+      streamerDisplayName: "Streamer",
+      streamStartedAt: new Date("2026-09-07T18:00:00Z"),
+      streamSessionId: "session",
+      assetId: "asset",
+      authorName: "Viewer",
+      messageText: "https://example.com/image.gif",
+      skipTelegramPublic: false,
+      telegramHasSpoiler: false,
+    });
+
+    expect(stored.telegramFileId).toBe("document-file");
+  });
+
   it("does not publish hidden assets", async () => {
     const { publishStoredTelegramMedia } = await import("./telegram-storage.js");
 

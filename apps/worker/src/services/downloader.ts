@@ -438,6 +438,17 @@ async function finalizeDownload(filePath: string, mediaType: "image" | "video", 
   let alreadyProcessedVideo = false;
 
   try {
+    if (finalMediaType === "image" && isGifMime(finalOriginalMimeType)) {
+      finalPath = path.join(os.tmpdir(), `archive-animation-${crypto.randomUUID()}.mp4`);
+      console.log(`[image] converting gif input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
+      await transcodeForTelegram(filePath, finalPath);
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      finalMediaType = "video";
+      finalOriginalMimeType = undefined;
+      telegramSendAsAnimation = true;
+      alreadyProcessedVideo = true;
+    }
+
     if (finalMediaType === "image" && isWebpMime(finalOriginalMimeType) && (await isAnimatedWebpFile(filePath))) {
       finalPath = path.join(os.tmpdir(), `archive-animation-${crypto.randomUUID()}.mp4`);
       console.log(`[image] converting animated webp input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
@@ -482,6 +493,10 @@ async function isAnimatedWebpFile(filePath: string): Promise<boolean> {
 
 function isWebpMime(mimeType: string | undefined): boolean {
   return mimeType?.split(";")[0]?.trim().toLowerCase() === "image/webp";
+}
+
+function isGifMime(mimeType: string | undefined): boolean {
+  return mimeType?.split(";")[0]?.trim().toLowerCase() === "image/gif";
 }
 
 async function convertAnimatedWebpToMp4(inputPath: string, outputPath: string): Promise<void> {

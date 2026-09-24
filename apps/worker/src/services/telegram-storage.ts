@@ -55,7 +55,14 @@ export async function storeTelegramMedia(filePath: string, mimeType: string, med
     console.log(`[telegram] sendVideo mime=${mimeType} file=${path.basename(filePath)} width=${videoMetadata.width ?? "unknown"} height=${videoMetadata.height ?? "unknown"}`);
     return telegramBot().api.sendVideo(env.TELEGRAM_STORAGE_CHAT_ID!, input, { caption, has_spoiler: metadata.telegramHasSpoiler, supports_streaming: true, ...videoMetadata });
   });
-  const file = "photo" in message ? message.photo.at(-1) : "video" in message ? message.video : message.animation;
+  const file =
+    "photo" in message
+      ? message.photo.at(-1)
+      : "video" in message
+        ? message.video
+        : "animation" in message
+          ? message.animation
+          : (message as unknown as Message.DocumentMessage).document;
   if (!file) throw new Error("Telegram did not return stored file metadata");
 
   return {
