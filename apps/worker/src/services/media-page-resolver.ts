@@ -1,4 +1,4 @@
-import { isPostimagePageUrl, mediaTypeFromUrl } from "@archive/core";
+import { isMediaPageUrl, mediaTypeFromUrl } from "@archive/core";
 
 const POSTIMAGE_CANDIDATE_URL = /https?:\/\/i\.postimg\.cc\/[^"' <>\]]+/gi;
 
@@ -26,7 +26,7 @@ export function extractPostimageDirectImageUrl(html: string, pageUrl: URL): URL 
 }
 
 export function isResolvableMediaPageUrl(rawUrl: string): boolean {
-  return isPostimagePageUrl(rawUrl);
+  return isMediaPageUrl(rawUrl);
 }
 
 function directImageUrl(value: string | null | undefined, pageUrl: URL): URL | null {

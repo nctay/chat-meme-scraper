@@ -7,10 +7,9 @@ export const ALLOWED_MEDIA_HOSTS = new Set([
   "cdn.discordapp.com",
   "images-ext-1.discordapp.net",
   "i.ibb.co",
-  "ibb.co",
 ]);
 export const PLATFORM_MEDIA_HOSTS = new Set(["www.tiktok.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"]);
-export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc"]);
+export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc", "ibb.co", "www.ibb.co"]);
 
 export const DEFAULT_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
@@ -79,10 +78,10 @@ export function mediaTypeFromUrl(rawUrl: string): MediaType {
 }
 
 export function isSupportedMediaUrl(rawUrl: string): boolean {
-  return mediaTypeFromUrl(rawUrl) !== "other" || isPlatformMediaUrl(rawUrl) || isPostimagePageUrl(rawUrl);
+  return mediaTypeFromUrl(rawUrl) !== "other" || isPlatformMediaUrl(rawUrl) || isMediaPageUrl(rawUrl);
 }
 
-export function isPostimagePageUrl(rawUrl: string): boolean {
+export function isMediaPageUrl(rawUrl: string): boolean {
   const url = toUrl(rawUrl);
   if (!url) return false;
   const hostname = url.hostname.toLowerCase();

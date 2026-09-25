@@ -18,6 +18,13 @@ describe("media page resolver", () => {
 
   it("recognizes Postimages pages as resolvable media pages", () => {
     expect(isResolvableMediaPageUrl("https://postimg.cc/Z0s0qgxY")).toBe(true);
+    expect(isResolvableMediaPageUrl("https://ibb.co/BJtPy5F")).toBe(true);
     expect(isResolvableMediaPageUrl("https://example.com/Z0s0qgxY")).toBe(false);
+  });
+
+  it("extracts the direct image from an ibb.co page", () => {
+    const pageUrl = new URL("https://ibb.co/BJtPy5F");
+    const html = '<meta property="og:image" content="https://i.ibb.co/GD0JW4N/photo.jpg" />';
+    expect(extractPostimageDirectImageUrl(html, pageUrl)?.toString()).toBe("https://i.ibb.co/GD0JW4N/photo.jpg");
   });
 });

@@ -29,6 +29,8 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://postimg.cc/2VfXX46j")).toBe(true);
     expect(mediaTypeFromUrl("https://postimg.cc/Z0s0qgxY")).toBe("other");
     expect(isSupportedMediaUrl("https://postimg.cc/gallery/abc")).toBe(false);
+    expect(isSupportedMediaUrl("https://ibb.co/BJtPy5F")).toBe(true);
+    expect(mediaTypeFromUrl("https://ibb.co/BJtPy5F")).toBe("other");
   });
 
   it("routes Twitch clips to the platform downloader and deduplicates URL variants", () => {

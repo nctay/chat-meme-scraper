@@ -374,16 +374,16 @@ async function resolveMediaPageUrl(url: URL): Promise<URL> {
       pageUrl = redirectUrl(pageUrl, response);
       continue;
     }
-    if (!response.ok) throw new Error(`Postimages page failed with ${response.status}`);
+    if (!response.ok) throw new Error(`Media page failed with ${response.status}`);
 
     const imageUrl = extractPostimageDirectImageUrl(await response.text(), pageUrl);
-    if (!imageUrl) throw new Error("Postimages direct image not found");
+    if (!imageUrl) throw new Error("Media page direct image not found");
     await assertSafeNetworkTarget(imageUrl);
-    console.log(`[resolver] postimg page=${url.toString()} image=${imageUrl.toString()}`);
+    console.log(`[resolver] media page=${url.toString()} image=${imageUrl.toString()}`);
     return imageUrl;
   }
 
-  throw new Error("Too many Postimages redirects");
+  throw new Error("Too many media page redirects");
 }
 
 async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
