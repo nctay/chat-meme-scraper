@@ -629,6 +629,7 @@ async function runFfmpeg(args: string[]): Promise<void> {
 }
 
 async function runYtDlp(args: string[]): Promise<string> {
+  args = ["--js-runtimes", "node", ...args];
   const hostname = toUrl(args.at(-1) ?? "")?.hostname.toLowerCase();
   if (hostname && (hostname === "youtu.be" || hostname === "youtube.com" || hostname.endsWith(".youtube.com")) && fs.existsSync(youtubeCookiesFile)) {
     args = ["--cookies", youtubeCookiesFile, ...args];
