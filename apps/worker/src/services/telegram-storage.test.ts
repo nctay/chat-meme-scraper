@@ -36,7 +36,7 @@ describe("Telegram media spoilers", () => {
     });
   });
 
-  it("hides w.tv media behind a Telegram spoiler", async () => {
+  it("stores archive media without a Telegram spoiler", async () => {
     const { storeTelegramMedia } = await import("./telegram-storage.js");
 
     await storeTelegramMedia("/dev/null", "image/jpeg", "image", {
@@ -51,14 +51,9 @@ describe("Telegram media spoilers", () => {
       authorName: "Viewer",
       messageText: "https://example.com/image.jpg",
       skipTelegramPublic: false,
-      telegramHasSpoiler: true,
     });
 
-    expect(apiMock.sendPhoto).toHaveBeenCalledWith(
-      "-100storage",
-      expect.anything(),
-      expect.objectContaining({ has_spoiler: true }),
-    );
+    expect(apiMock.sendPhoto.mock.calls[0]?.[2]).not.toHaveProperty("has_spoiler");
   });
 
   it("accepts a GIF that Telegram stored as a document", async () => {
@@ -81,7 +76,6 @@ describe("Telegram media spoilers", () => {
       authorName: "Viewer",
       messageText: "https://example.com/image.gif",
       skipTelegramPublic: false,
-      telegramHasSpoiler: false,
     });
 
     expect(stored.telegramFileId).toBe("document-file");

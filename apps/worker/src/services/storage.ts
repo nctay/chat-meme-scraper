@@ -24,7 +24,6 @@ export type StoreMediaMetadata = {
   messageText: string;
   skipTelegramPublic: boolean;
   telegramSendAsAnimation?: boolean;
-  telegramHasSpoiler?: boolean;
 };
 
 export type PublicTelegramMediaMetadata = Pick<StoreMediaMetadata, "streamerLogin" | "streamStartedAt" | "authorName" | "messageText" | "skipTelegramPublic">;
