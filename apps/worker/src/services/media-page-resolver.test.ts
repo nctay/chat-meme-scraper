@@ -27,4 +27,12 @@ describe("media page resolver", () => {
     const html = '<meta property="og:image" content="https://i.ibb.co/GD0JW4N/photo.jpg" />';
     expect(extractPostimageDirectImageUrl(html, pageUrl)?.toString()).toBe("https://i.ibb.co/GD0JW4N/photo.jpg");
   });
+
+  it("extracts the displayed eblo.id image instead of its thumbnail", () => {
+    const pageUrl = new URL("https://eblo.id/eLuDq7N");
+    const html = '<meta property="og:image" content="/uploads/thumbs/eLuDq7N_thumb.webp"><img id="preview-image" src="/uploads/eLuDq7N/photo.opt.webp">';
+    expect(isResolvableMediaPageUrl(pageUrl.toString())).toBe(true);
+    expect(extractPostimageDirectImageUrl(html, pageUrl)?.toString()).toBe("https://eblo.id/uploads/eLuDq7N/photo.opt.webp");
+    expect(extractPostimageDirectImageUrl('<meta property="og:image" content="/uploads/thumbs/eLuDq7N_thumb.webp">', pageUrl)).toBeNull();
+  });
 });

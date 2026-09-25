@@ -3,6 +3,15 @@ import { isMediaPageUrl, mediaTypeFromUrl } from "@archive/core";
 const POSTIMAGE_CANDIDATE_URL = /https?:\/\/i\.postimg\.cc\/[^"' <>\]]+/gi;
 
 export function extractPostimageDirectImageUrl(html: string, pageUrl: URL): URL | null {
+  if (pageUrl.hostname === "eblo.id" || pageUrl.hostname === "www.eblo.id") {
+    for (const tag of html.matchAll(/<img\b[^>]*>/gi)) {
+      if (htmlAttribute(tag[0], "id") !== "preview-image") continue;
+      const url = directImageUrl(htmlAttribute(tag[0], "src"), pageUrl);
+      if (url) return url;
+    }
+    return null;
+  }
+
   for (const tag of html.matchAll(/<meta\b[^>]*>/gi)) {
     const property = htmlAttribute(tag[0], "property") ?? htmlAttribute(tag[0], "name");
     if (!property || !["og:image", "twitter:image"].includes(property.toLowerCase())) continue;

@@ -33,6 +33,8 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://postimg.cc/gallery/abc")).toBe(false);
     expect(isSupportedMediaUrl("https://ibb.co/BJtPy5F")).toBe(true);
     expect(mediaTypeFromUrl("https://ibb.co/BJtPy5F")).toBe("other");
+    expect(isSupportedMediaUrl("https://eblo.id/eLuDq7N")).toBe(true);
+    expect(isSupportedMediaUrl("https://eblo.id/@hokusmodertwitcha")).toBe(false);
   });
 
   it("routes Twitch clips to the platform downloader and deduplicates URL variants", () => {

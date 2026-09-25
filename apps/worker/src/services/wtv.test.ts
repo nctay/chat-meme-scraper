@@ -79,6 +79,13 @@ describe("w.tv polling", () => {
               sender: { userId: "viewer-2", nickname: "Viewer2" },
               createdAt: "2026-08-12T19:45:49.276Z",
             },
+            {
+              messageId: "msg-3",
+              type: "MESSAGE",
+              content: "https://eblo.id/eLuDq7N",
+              sender: { userId: "viewer-3", nickname: "HokusModerWW" },
+              createdAt: "2026-08-12T19:46:49.276Z",
+            },
           ],
         });
       }
@@ -114,7 +121,7 @@ describe("w.tv polling", () => {
     );
     const fetchCalls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
     expect(fetchCalls.some(([url]) => String(url).includes("limit=100"))).toBe(true);
-    expect(ingestChatMessageMock).toHaveBeenCalledTimes(1);
+    expect(ingestChatMessageMock).toHaveBeenCalledTimes(2);
     expect(ingestChatMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         streamerLogin: "kingkong_movie",
@@ -122,6 +129,13 @@ describe("w.tv polling", () => {
         authorTwitchId: "wtv:viewer-2",
         authorName: "Viewer2",
         messageText: "look https://example.com/a.jpg",
+      }),
+    );
+    expect(ingestChatMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        twitchMessageId: "wtv:msg-3",
+        authorName: "HokusModerWW",
+        messageText: "https://eblo.id/eLuDq7N",
       }),
     );
   });
