@@ -21,7 +21,9 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://vm.tiktok.com/ZMabcdef/")).toBe(true);
     expect(isSupportedMediaUrl("https://www.youtube.com/shorts/abc123")).toBe(true);
     expect(isSupportedMediaUrl("https://youtu.be/abc123")).toBe(true);
-    expect(isSupportedMediaUrl("https://www.youtube.com/watch?v=abc123")).toBe(false);
+    expect(isSupportedMediaUrl("https://www.youtube.com/watch?v=1pQ1g5uGj7s")).toBe(true);
+    expect(isPlatformMediaUrl("https://www.youtube.com/watch?v=1pQ1g5uGj7s")).toBe(true);
+    expect(isSupportedMediaUrl("https://www.youtube.com/watch?list=abc123")).toBe(false);
   });
 
   it("detects supported Postimages page URLs", () => {

@@ -49,6 +49,8 @@ ALLOW_PRIVATE_MEDIA_HOSTS="false"
 
 `WTV_CHANNELS` принимает ники или URL через запятую, например `kingkong_movie,mishamedvedka`.
 
+Обычные YouTube-ссылки и Shorts скачиваются, если ролик не длиннее `MAX_PLATFORM_VIDEO_SECONDS` (по умолчанию 5 минут). Для видео с возрастным ограничением нужен YouTube-аккаунт с подтверждённым возрастом. После деплоя запусти `scripts/setup-youtube-cookies.sh`: он поможет загрузить cookies на VPS и проверит доступ. Файл хранится только в `/srv/chat-meme-scraper/private/youtube-cookies.txt`, не в Git.
+
 Админского и публичного Telegram-ботов добавь в приватный storage-канал, чтобы оба могли делать `copyMessage`.
 
 Для канала удаленных сообщений `TWITCH_EVENTSUB_USER_TOKEN` должен иметь `user:read:chat`, а `TWITCH_EVENTSUB_USER_ID` — Twitch user id этого же чат-аккаунта/бота. Модераторские права не нужны, но Twitch не отдаст имя модератора, который удалил сообщение.

@@ -26,6 +26,7 @@ type DownloadResult = {
 };
 
 const shaLocks = new Map<string, Promise<void>>();
+const youtubeCookiesFile = "/run/private/youtube-cookies.txt";
 
 export async function processDownloadQueue(): Promise<void> {
   const slots = Math.max(1, env.MAX_PARALLEL_DOWNLOADS);
@@ -628,6 +629,10 @@ async function runFfmpeg(args: string[]): Promise<void> {
 }
 
 async function runYtDlp(args: string[]): Promise<string> {
+  const hostname = toUrl(args.at(-1) ?? "")?.hostname.toLowerCase();
+  if (hostname && (hostname === "youtu.be" || hostname === "youtube.com" || hostname.endsWith(".youtube.com")) && fs.existsSync(youtubeCookiesFile)) {
+    args = ["--cookies", youtubeCookiesFile, ...args];
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), env.PLATFORM_DOWNLOAD_TIMEOUT_MS);
 

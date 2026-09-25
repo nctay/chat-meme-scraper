@@ -77,6 +77,8 @@ jobs:
           script: |
             set -e
             mkdir -p "$APP_DIR"
+            mkdir -p "$APP_DIR/private"
+            chmod 700 "$APP_DIR/private"
 
       - uses: appleboy/scp-action@v0.1.7
         with:

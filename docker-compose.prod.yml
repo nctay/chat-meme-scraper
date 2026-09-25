@@ -17,6 +17,8 @@ services:
   worker:
     image: ${WORKER_IMAGE:?WORKER_IMAGE is required}
     restart: unless-stopped
+    volumes:
+      - ./private:/run/private
     env_file:
       - path: .env
         required: true
