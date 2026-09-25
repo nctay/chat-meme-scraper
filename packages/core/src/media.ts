@@ -9,7 +9,7 @@ export const ALLOWED_MEDIA_HOSTS = new Set([
   "i.ibb.co",
 ]);
 export const PLATFORM_MEDIA_HOSTS = new Set(["www.tiktok.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"]);
-export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc", "ibb.co", "www.ibb.co", "eblo.id", "www.eblo.id"]);
+export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc", "ibb.co", "www.ibb.co", "eblo.id", "www.eblo.id", "disk.yandex.ru", "yadi.sk"]);
 
 export const DEFAULT_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
@@ -44,6 +44,7 @@ export function normalizeUrl(rawUrl: string): string | null {
 
   const twitchClipId = getTwitchClipId(url);
   if (twitchClipId) return `https://clips.twitch.tv/${twitchClipId}`;
+  if (isYandexDiskUrl(url.toString())) return `https://disk.yandex.ru${url.pathname.replace(/\/$/, "")}`;
 
   if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) {
     url.port = "";
@@ -70,6 +71,7 @@ export function getExtension(urlOrPath: string): string | null {
 export function mediaTypeFromUrl(rawUrl: string): MediaType {
   const url = toUrl(rawUrl);
   if (!url) return "other";
+  if (["disk.yandex.ru", "yadi.sk"].includes(url.hostname.toLowerCase())) return "other";
   const ext = getExtension(url.pathname);
   if (ext && IMAGE_EXTENSIONS.has(ext)) return "image";
   if (ext && VIDEO_EXTENSIONS.has(ext)) return "video";
@@ -86,9 +88,15 @@ export function isMediaPageUrl(rawUrl: string): boolean {
   if (!url) return false;
   const hostname = url.hostname.toLowerCase();
   if (!MEDIA_PAGE_HOSTS.has(hostname)) return false;
+  if (hostname === "disk.yandex.ru" || hostname === "yadi.sk") return isYandexDiskUrl(rawUrl);
   const segments = url.pathname.split("/").filter(Boolean);
   if (hostname === "eblo.id" || hostname === "www.eblo.id") return segments.length === 1 && /^[A-Za-z0-9]{7}$/.test(segments[0] ?? "");
   return segments.length === 1 && segments[0] !== "gallery";
+}
+
+export function isYandexDiskUrl(rawUrl: string): boolean {
+  const url = toUrl(rawUrl);
+  return Boolean(url && url.protocol === "https:" && ["disk.yandex.ru", "yadi.sk"].includes(url.hostname.toLowerCase()) && /^\/(?:i|d)\/[A-Za-z0-9_-]+\/?$/.test(url.pathname));
 }
 
 export function isPlatformMediaUrl(rawUrl: string): boolean {

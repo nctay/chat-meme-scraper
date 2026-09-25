@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isAnimatedWebp, isPlatformMediaUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
+import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isAnimatedWebp, isPlatformMediaUrl, isYandexDiskUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
@@ -14,6 +14,7 @@ import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-do
 import { publishStoredTelegramMedia } from "./telegram-storage.js";
 import { extractPostimageDirectImageUrl, isResolvableMediaPageUrl } from "./media-page-resolver.js";
 import { classifyNsfw } from "./nsfw.js";
+import { resolveYandexDiskMediaUrl } from "./yandex-disk.js";
 
 type DownloadResult = {
   filePath: string;
@@ -362,6 +363,11 @@ async function downloadDirectMedia(rawUrl: string): Promise<DownloadResult> {
 }
 
 async function resolveMediaPageUrl(url: URL): Promise<URL> {
+  if (isYandexDiskUrl(url.toString())) {
+    const directUrl = await resolveYandexDiskMediaUrl(url, env.MAX_IMAGE_BYTES, env.MAX_VIDEO_BYTES);
+    await assertSafeNetworkTarget(directUrl);
+    return directUrl;
+  }
   if (!isResolvableMediaPageUrl(url.toString())) return url;
 
   let pageUrl = url;

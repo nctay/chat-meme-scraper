@@ -37,6 +37,17 @@ describe("media helpers", () => {
     expect(isSupportedMediaUrl("https://eblo.id/@hokusmodertwitcha")).toBe(false);
   });
 
+  it("accepts Yandex Disk public files but not arbitrary Disk pages", () => {
+    expect(isSupportedMediaUrl("https://disk.yandex.ru/i/mkcCJXbMfEzTkw")).toBe(true);
+    expect(isSupportedMediaUrl("https://disk.yandex.ru/d/abc123")).toBe(true);
+    expect(isSupportedMediaUrl("https://yadi.sk/i/mkcCJXbMfEzTkw")).toBe(true);
+    expect(normalizeUrl("https://yadi.sk/i/mkcCJXbMfEzTkw/?utm_source=chat")).toBe("https://disk.yandex.ru/i/mkcCJXbMfEzTkw");
+    expect(isSupportedMediaUrl("https://disk.yandex.ru/client/disk")).toBe(false);
+    expect(isSupportedMediaUrl("https://disk.yandex.ru/client/not-a-public-file.png")).toBe(false);
+    expect(isSupportedMediaUrl("https://disk.yandex.ru/i/")).toBe(false);
+    expect(isSupportedMediaUrl("https://disk.yandex.ru.evil.com/i/abc123")).toBe(false);
+  });
+
   it("routes Twitch clips to the platform downloader and deduplicates URL variants", () => {
     const slug = "DaintyUninterestedCroquetteYouWHY-qeA25bWxkzdRS1Wf";
     const canonical = `https://clips.twitch.tv/${slug}`;
