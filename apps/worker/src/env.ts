@@ -27,7 +27,8 @@ export const env = z
     MAX_PLATFORM_VIDEO_SECONDS: z.coerce.number().default(300),
     PLATFORM_DOWNLOAD_TIMEOUT_MS: z.coerce.number().default(600_000),
     NSFW_CLASSIFIER_URL: z.string().url().optional(),
-    NSFW_SPOILER_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
+    NSFW_NUDE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
+    NSFW_NIPPLES_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
     NSFW_MAX_FRAMES: z.coerce.number().int().min(1).max(20).default(8),
   })
   .parse(process.env);

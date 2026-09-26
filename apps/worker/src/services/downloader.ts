@@ -82,7 +82,7 @@ async function processOneJob(): Promise<void> {
           downloaded.mediaType === "video" || downloaded.mimeType === "image/gif" || Boolean(downloaded.telegramSendAsAnimation),
         );
         console.log(
-          `[nsfw] asset=${assetId} status=${moderation.status} class=${moderation.className ?? "none"} score=${moderation.score?.toFixed(4) ?? "none"} public_spoiler=${moderation.publicSpoiler}`,
+          `[nsfw] asset=${assetId} status=${moderation.status} nude=${moderation.nudeScore?.toFixed(4) ?? "none"} nipples=${moderation.nipplesScore?.toFixed(4) ?? "none"} public_spoiler=${moderation.publicSpoiler}`,
         );
         const stored = await storeMedia(downloaded.filePath, downloaded.mimeType, downloaded.mediaType, {
           originalUrl: job.url,

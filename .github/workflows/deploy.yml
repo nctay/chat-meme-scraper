@@ -36,6 +36,7 @@ jobs:
       APP_DIR: ${{ secrets.VPS_APP_DIR || '/srv/chat-meme-scraper' }}
       BOT_IMAGE: ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-bot:${{ github.sha }}
       WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-worker:${{ github.sha }}
+      NSFW_IMAGE: ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-nsfw:${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ github.token }}
       PROD_ENV_B64: ${{ secrets.PROD_ENV_B64 }}
@@ -69,6 +70,15 @@ jobs:
             ${{ env.BOT_IMAGE }}
             ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-bot:latest
 
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/nsfw/Dockerfile
+          push: true
+          tags: |
+            ${{ env.NSFW_IMAGE }}
+            ghcr.io/${{ github.repository_owner }}/chat-meme-scraper-nsfw:latest
+
       - uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -94,7 +104,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: APP_DIR,PROD_ENV_B64,YOUTUBE_COOKIES_B64,BOT_IMAGE,WORKER_IMAGE,GHCR_USERNAME,GHCR_TOKEN
+          envs: APP_DIR,PROD_ENV_B64,YOUTUBE_COOKIES_B64,BOT_IMAGE,WORKER_IMAGE,NSFW_IMAGE,GHCR_USERNAME,GHCR_TOKEN
           script: |
             set -e
             cd "$APP_DIR"
@@ -108,6 +118,7 @@ jobs:
             {
               echo "BOT_IMAGE=$BOT_IMAGE"
               echo "WORKER_IMAGE=$WORKER_IMAGE"
+              echo "NSFW_IMAGE=$NSFW_IMAGE"
             } >> .env
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             docker compose -f docker-compose.prod.yml pull worker bot nsfw
