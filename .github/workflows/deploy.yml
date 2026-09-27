@@ -121,8 +121,8 @@ jobs:
               echo "NSFW_IMAGE=$NSFW_IMAGE"
             } >> .env
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-            docker compose -f docker-compose.prod.yml pull worker bot nsfw
+            docker compose -f docker-compose.prod.yml pull worker bot nsfw nsfwjs
             docker compose -f docker-compose.prod.yml up -d postgres
             docker compose -f docker-compose.prod.yml run --rm worker pnpm db:migrate
-            docker compose -f docker-compose.prod.yml up -d nsfw worker bot
+            docker compose -f docker-compose.prod.yml up -d nsfw nsfwjs worker bot
             docker compose -f docker-compose.prod.yml ps

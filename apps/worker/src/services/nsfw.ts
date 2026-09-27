@@ -7,11 +7,14 @@ import { env } from "../env.js";
 
 const execFileAsync = promisify(execFile);
 type NudityScores = { nude: number; nipples: number };
+type Prediction = { className: string; probability: number };
 
 export type NsfwResult = {
   publicSpoiler: boolean;
   nudeScore?: number;
   nipplesScore?: number;
+  nsfwjsClassName?: string;
+  nsfwjsScore?: number;
   status: "disabled" | "ok" | "error";
 };
 
@@ -20,7 +23,8 @@ export async function classifyNsfw(filePath: string, animated: boolean): Promise
 
   const frameDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-nsfw-"));
   try {
-    const frames = await extractFrames(filePath, frameDir, animated ? env.NSFW_MAX_FRAMES : 1);
+    const maxFrames = animated ? env.NSFW_MAX_FRAMES : 1;
+    const frames = await extractFrames(filePath, path.join(frameDir, "wd"), maxFrames, false);
     let highest: NudityScores = { nude: 0, nipples: 0 };
 
     for (const frame of frames) {
@@ -37,10 +41,30 @@ export async function classifyNsfw(filePath: string, animated: boolean): Promise
       highest = { nude: Math.max(highest.nude, body.nude), nipples: Math.max(highest.nipples, body.nipples) };
     }
 
+    const nsfwjsFrames = await extractFrames(filePath, path.join(frameDir, "nsfwjs"), maxFrames, true);
+    let highestHard: Prediction | undefined;
+    for (const frame of nsfwjsFrames) {
+      const response = await fetch(env.NSFWJS_CLASSIFIER_URL, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: await fs.promises.readFile(frame),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`NSFWJS classifier returned ${response.status}`);
+
+      const body = (await response.json()) as { prediction?: unknown };
+      if (!Array.isArray(body.prediction)) throw new Error("NSFWJS classifier returned invalid predictions");
+      const candidate = highestHardNsfwPrediction(body.prediction);
+      if (!candidate) throw new Error("NSFWJS classifier returned no Porn or Hentai score");
+      if (!highestHard || candidate.probability > highestHard.probability) highestHard = candidate;
+    }
+
     return {
-      publicSpoiler: shouldSpoiler(highest),
+      publicSpoiler: shouldSpoiler(highest, highestHard?.probability ?? 0),
       nudeScore: highest.nude,
       nipplesScore: highest.nipples,
+      nsfwjsClassName: highestHard?.className,
+      nsfwjsScore: highestHard?.probability,
       status: "ok",
     };
   } catch (error) {
@@ -51,15 +75,26 @@ export async function classifyNsfw(filePath: string, animated: boolean): Promise
   }
 }
 
-export function shouldSpoiler(scores: NudityScores): boolean {
-  return scores.nude >= env.NSFW_NUDE_THRESHOLD || scores.nipples >= env.NSFW_NIPPLES_THRESHOLD;
+export function shouldSpoiler(scores: NudityScores, nsfwjsScore: number): boolean {
+  return scores.nude >= env.NSFW_NUDE_THRESHOLD || scores.nipples >= env.NSFW_NIPPLES_THRESHOLD || nsfwjsScore >= env.NSFWJS_SPOILER_THRESHOLD;
 }
 
-async function extractFrames(filePath: string, outputDir: string, maxFrames: number): Promise<string[]> {
+export function highestHardNsfwPrediction(predictions: unknown[]): Prediction | undefined {
+  return predictions
+    .filter(validPrediction)
+    .filter((prediction) => prediction.className === "Porn" || prediction.className === "Hentai")
+    .reduce<Prediction | undefined>((highest, prediction) => (!highest || prediction.probability > highest.probability ? prediction : highest), undefined);
+}
+
+async function extractFrames(filePath: string, outputDir: string, maxFrames: number, nsfwjs: boolean): Promise<string[]> {
+  await fs.promises.mkdir(outputDir);
   const duration = maxFrames > 1 ? await readDuration(filePath) : 0;
-  const filter = maxFrames > 1 ? `fps=${duration > 0 ? maxFrames / duration : 1}` : "null";
+  const filters = [
+    ...(maxFrames > 1 ? [`fps=${duration > 0 ? maxFrames / duration : 1}`] : []),
+    ...(nsfwjs ? ["scale=224:224:force_original_aspect_ratio=decrease", "pad=224:224:(ow-iw)/2:(oh-ih)/2"] : []),
+  ];
   const output = path.join(outputDir, "frame-%02d.jpg");
-  await execFileAsync("ffmpeg", ["-v", "error", "-i", filePath, "-vf", filter, "-frames:v", String(maxFrames), "-q:v", "1", output], { timeout: 30_000 });
+  await execFileAsync("ffmpeg", ["-v", "error", "-i", filePath, "-vf", filters.join(",") || "null", "-frames:v", String(maxFrames), "-q:v", nsfwjs ? "4" : "1", output], { timeout: 30_000 });
   const frames = (await fs.promises.readdir(outputDir)).filter((name) => name.endsWith(".jpg")).sort().map((name) => path.join(outputDir, name));
   if (frames.length === 0) throw new Error("ffmpeg extracted no frames");
   return frames;
@@ -81,5 +116,17 @@ function validNudityScores(value: unknown): value is NudityScores {
   return (
     typeof scores.nude === "number" && Number.isFinite(scores.nude) && scores.nude >= 0 && scores.nude <= 1 &&
     typeof scores.nipples === "number" && Number.isFinite(scores.nipples) && scores.nipples >= 0 && scores.nipples <= 1
+  );
+}
+
+function validPrediction(value: unknown): value is Prediction {
+  if (!value || typeof value !== "object") return false;
+  const prediction = value as Partial<Prediction>;
+  return (
+    typeof prediction.className === "string" &&
+    typeof prediction.probability === "number" &&
+    Number.isFinite(prediction.probability) &&
+    prediction.probability >= 0 &&
+    prediction.probability <= 1
   );
 }
