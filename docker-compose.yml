@@ -27,6 +27,8 @@ services:
     environment:
       NSFW_CLASSIFIER_URL: http://nsfw:3333/classify
       NSFWJS_CLASSIFIER_URL: http://nsfwjs:3333/classify
+      NSFW_NIPPLES_THRESHOLD: "0.4"
+      NSFWJS_SPOILER_THRESHOLD: "0.4"
     depends_on:
       postgres:
         condition: service_healthy
