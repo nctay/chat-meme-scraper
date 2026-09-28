@@ -89,15 +89,19 @@ export function highestHardNsfwPrediction(predictions: unknown[]): Prediction | 
 async function extractFrames(filePath: string, outputDir: string, maxFrames: number, nsfwjs: boolean): Promise<string[]> {
   await fs.promises.mkdir(outputDir);
   const duration = maxFrames > 1 ? await readDuration(filePath) : 0;
-  const filters = [
-    ...(maxFrames > 1 ? [`fps=${duration > 0 ? maxFrames / duration : 1}`] : []),
-    ...(nsfwjs ? ["scale=224:224:force_original_aspect_ratio=decrease", "pad=224:224:(ow-iw)/2:(oh-ih)/2"] : []),
-  ];
+  const filters = frameFilters(maxFrames, duration, nsfwjs);
   const output = path.join(outputDir, "frame-%02d.jpg");
   await execFileAsync("ffmpeg", ["-v", "error", "-i", filePath, "-vf", filters.join(",") || "null", "-frames:v", String(maxFrames), "-q:v", nsfwjs ? "4" : "1", output], { timeout: 30_000 });
   const frames = (await fs.promises.readdir(outputDir)).filter((name) => name.endsWith(".jpg")).sort().map((name) => path.join(outputDir, name));
   if (frames.length === 0) throw new Error("ffmpeg extracted no frames");
   return frames;
+}
+
+export function frameFilters(maxFrames: number, duration: number, nsfwjs: boolean): string[] {
+  return [
+    ...(maxFrames > 1 ? [`fps=${duration > 0 ? maxFrames / duration : 1}`] : []),
+    ...(nsfwjs ? ["scale=224:224:force_original_aspect_ratio=decrease", ...(maxFrames === 1 ? ["pad=224:224:(ow-iw)/2:(oh-ih)/2"] : [])] : []),
+  ];
 }
 
 async function readDuration(filePath: string): Promise<number> {
