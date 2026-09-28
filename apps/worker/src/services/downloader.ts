@@ -79,6 +79,7 @@ async function processOneJob(): Promise<void> {
         const assetId = existingByUrl?.id ?? crypto.randomUUID();
         const moderation = await classifyNsfw(
           downloaded.filePath,
+          downloaded.mediaType,
           downloaded.mediaType === "video" || downloaded.mimeType === "image/gif" || Boolean(downloaded.telegramSendAsAnimation),
         );
         console.log(

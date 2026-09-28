@@ -28,9 +28,9 @@ export const env = z
     PLATFORM_DOWNLOAD_TIMEOUT_MS: z.coerce.number().default(600_000),
     NSFW_CLASSIFIER_URL: z.string().url().optional(),
     NSFWJS_CLASSIFIER_URL: z.string().url().default("http://nsfwjs:3333/classify"),
-    NSFW_NUDE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
-    NSFW_NIPPLES_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
-    NSFWJS_SPOILER_THRESHOLD: z.coerce.number().min(0).max(1).default(0.58),
+    NSFW_NUDE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
+    NSFW_NIPPLES_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
+    NSFWJS_SPOILER_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
     NSFW_MAX_FRAMES: z.coerce.number().int().min(1).max(20).default(8),
   })
   .parse(process.env);

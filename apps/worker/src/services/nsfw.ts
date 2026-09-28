@@ -18,8 +18,9 @@ export type NsfwResult = {
   status: "disabled" | "ok" | "error";
 };
 
-export async function classifyNsfw(filePath: string, animated: boolean): Promise<NsfwResult> {
-  if (!env.NSFW_CLASSIFIER_URL) return { publicSpoiler: false, status: "disabled" };
+export async function classifyNsfw(filePath: string, mediaType: "image" | "video", animated: boolean): Promise<NsfwResult> {
+  // ponytail: Video moderation is disabled until a replacement passes a labeled video benchmark.
+  if (mediaType === "video" || !env.NSFW_CLASSIFIER_URL) return { publicSpoiler: false, status: "disabled" };
 
   const frameDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-nsfw-"));
   try {
