@@ -4,11 +4,17 @@ import { processDownloadQueue } from "./services/downloader.js";
 import { prisma } from "./prisma.js";
 
 let shuttingDown = false;
+let downloadTask: Promise<void> | null = null;
 
 async function tick(): Promise<void> {
   ensureEventSubConnected();
   void ensureChatConnected().catch((error) => console.error("[tick] chat failed", error));
-  const results = await Promise.allSettled([pollTwitchStreams(), pollWtvStreams(), processDownloadQueue(), cleanupExpiredChatMessages()]);
+  downloadTask ??= processDownloadQueue()
+    .catch((error) => console.error("[tick] downloads failed", error))
+    .finally(() => {
+      downloadTask = null;
+    });
+  const results = await Promise.allSettled([pollTwitchStreams(), pollWtvStreams(), cleanupExpiredChatMessages()]);
   for (const result of results) {
     if (result.status === "rejected") console.error("[tick] task failed", result.reason);
   }
@@ -29,4 +35,5 @@ process.on("SIGTERM", () => {
 });
 
 await loop();
+await downloadTask;
 await prisma.$disconnect();
