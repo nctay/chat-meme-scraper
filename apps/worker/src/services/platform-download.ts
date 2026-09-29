@@ -12,6 +12,20 @@ export type PlatformMetadata = {
   }>;
 };
 
+const platformAudioBudgetBytes = 10 * 1024 * 1024;
+
+export function platformFormatSelector(limitBytes: number): string {
+  const audioBudget = Math.min(platformAudioBudgetBytes, Math.floor(limitBytes / 2));
+  const videoBudget = limitBytes - audioBudget;
+  return [
+    `bv*[ext=mp4][vcodec^=avc][filesize<${videoBudget}]+ba[ext=m4a][filesize<${audioBudget}]`,
+    `b[ext=mp4][vcodec^=avc][filesize<${limitBytes}]`,
+    `bv*[ext=mp4][filesize<${videoBudget}]+ba[ext=m4a][filesize<${audioBudget}]`,
+    `b[ext=mp4][filesize<${limitBytes}]`,
+    "best",
+  ].join("/");
+}
+
 export function assertPlatformMetadataFits(metadata: PlatformMetadata, limitBytes: number, maxDurationSeconds: number): void {
   if (typeof metadata.duration === "number" && metadata.duration > maxDurationSeconds) {
     throw new Error(`Platform video is too long: ${metadata.duration}s > ${maxDurationSeconds}s`);

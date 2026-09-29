@@ -11,7 +11,7 @@ import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isAnimatedWebp,
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 import { storeMedia } from "./storage.js";
-import { assertPlatformMetadataFits, type PlatformMetadata } from "./platform-download.js";
+import { assertPlatformMetadataFits, platformFormatSelector, type PlatformMetadata } from "./platform-download.js";
 import { publishStoredTelegramMedia } from "./telegram-storage.js";
 import { extractPostimageDirectImageUrl, isResolvableMediaPageUrl } from "./media-page-resolver.js";
 import { classifyNsfw } from "./nsfw.js";
@@ -405,8 +405,9 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
   assertSafeUrl(url);
 
   const limit = env.MAX_VIDEO_BYTES;
+  const formatSelector = platformFormatSelector(limit);
   console.log(`[platform] metadata url=${url.toString()}`);
-  await assertPlatformVideoFits(url.toString(), limit);
+  await assertPlatformVideoFits(url.toString(), limit, formatSelector);
   console.log(`[platform] downloading url=${url.toString()}`);
 
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-platform-"));
@@ -420,7 +421,7 @@ async function downloadPlatformVideo(rawUrl: string): Promise<DownloadResult> {
     "--match-filter",
     `duration <= ${env.MAX_PLATFORM_VIDEO_SECONDS}`,
     "--format",
-    "bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+    formatSelector,
     "--merge-output-format",
     "mp4",
     "--output",
@@ -647,7 +648,7 @@ async function runImageMagick(args: string[]): Promise<void> {
   }
 }
 
-async function assertPlatformVideoFits(url: string, limit: number): Promise<void> {
+async function assertPlatformVideoFits(url: string, limit: number, formatSelector: string): Promise<void> {
   const metadata = JSON.parse(
     await runYtDlp([
       "--dump-json",
@@ -655,6 +656,8 @@ async function assertPlatformVideoFits(url: string, limit: number): Promise<void
       "--no-playlist",
       "--no-warnings",
       "--no-progress",
+      "--format",
+      formatSelector,
       url,
     ]),
   ) as PlatformMetadata;

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { assertPlatformMetadataFits, bestKnownPlatformSize } from "./platform-download.js";
+import { assertPlatformMetadataFits, bestKnownPlatformSize, platformFormatSelector } from "./platform-download.js";
 
 describe("platform download metadata checks", () => {
+  it("keeps split video and audio formats within the source limit", () => {
+    expect(platformFormatSelector(100 * 1024 * 1024)).toContain(
+      "[filesize<94371840]+ba[ext=m4a][filesize<10485760]",
+    );
+  });
+
   it("uses top-level filesize when yt-dlp provides it", () => {
     expect(bestKnownPlatformSize({ filesize: 12_000_000, formats: [{ filesize: 8_000_000, ext: "mp4", vcodec: "h264" }] })).toBe(12_000_000);
   });
