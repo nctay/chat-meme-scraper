@@ -19,7 +19,7 @@ export const env = z
     TELEGRAM_PRIVATE_STREAMER_LOGINS: z.string().default(""),
     TWITCH_CHAT_MESSAGE_RETENTION_MINUTES: z.coerce.number().default(120),
     MAX_IMAGE_BYTES: z.coerce.number().default(30 * 1024 * 1024),
-    MAX_VIDEO_BYTES: z.coerce.number().default(150 * 1024 * 1024),
+    MAX_VIDEO_BYTES: z.coerce.number().default(100 * 1024 * 1024),
     MAX_DAILY_DOWNLOAD_BYTES: z.coerce.number().default(10 * 1024 * 1024 * 1024),
     MAX_PARALLEL_DOWNLOADS: z.coerce.number().default(2),
     ALLOW_PRIVATE_MEDIA_HOSTS: z.coerce.boolean().default(false),

@@ -23,6 +23,7 @@ services:
       - path: .env
         required: true
     environment:
+      MAX_VIDEO_BYTES: "104857600"
       NSFW_ENSEMBLE_CLASSIFIER_URL: http://nsfw-ensemble:3333/classify
       NSFW_ENSEMBLE_THRESHOLD: "0.8"
     depends_on:

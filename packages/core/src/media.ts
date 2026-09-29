@@ -12,7 +12,7 @@ export const PLATFORM_MEDIA_HOSTS = new Set(["www.tiktok.com", "tiktok.com", "vm
 export const MEDIA_PAGE_HOSTS = new Set(["postimg.cc", "www.postimg.cc", "ibb.co", "www.ibb.co", "eblo.id", "www.eblo.id", "disk.yandex.ru", "yadi.sk"]);
 
 export const DEFAULT_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
-export const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
+export const DEFAULT_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 const URL_PATTERN =
   /\b(?:(?:https?:\/\/|www\.)[^\s<>"'`]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"'`]*)?)/gi;

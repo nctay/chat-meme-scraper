@@ -3,9 +3,10 @@ import dns from "node:dns/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
+import { promisify } from "node:util";
 import { assertSafeResolvedAddress, assertSafeUrl, getExtension, isAnimatedWebp, isPlatformMediaUrl, isYandexDiskUrl, maxBytesForMediaType, mediaTypeFromContentType, mediaTypeFromUrl, normalizeUrl, toUrl } from "@archive/core";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
@@ -28,6 +29,8 @@ type DownloadResult = {
 
 const shaLocks = new Map<string, Promise<void>>();
 const youtubeCookiesFile = "/run/private/youtube-cookies.txt";
+const telegramVideoMaxBytes = 49_900_000;
+const execFileAsync = promisify(execFile);
 
 export async function processDownloadQueue(): Promise<void> {
   const slots = Math.max(1, env.MAX_PARALLEL_DOWNLOADS);
@@ -467,16 +470,22 @@ async function finalizeDownload(filePath: string, mediaType: "image" | "video", 
       alreadyProcessedVideo = true;
     }
 
-    if (finalMediaType === "video" && !alreadyProcessedVideo) {
+    const needsVideoConversion = finalMediaType === "video" && !alreadyProcessedVideo && !isTelegramMp4(finalPath, finalOriginalMimeType);
+    const needsVideoCompression = finalMediaType === "video" && (await fs.promises.stat(finalPath)).size > telegramVideoMaxBytes;
+    if (finalMediaType === "video" && (needsVideoConversion || needsVideoCompression)) {
+      const inputPath = finalPath;
       finalPath = path.join(os.tmpdir(), `archive-video-${crypto.randomUUID()}.mp4`);
-      console.log(`[video] transcoding input=${path.basename(filePath)} output=${path.basename(finalPath)}`);
-      await transcodeForTelegram(filePath, finalPath);
-      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      console.log(`[video] transcoding input=${path.basename(inputPath)} output=${path.basename(finalPath)} target_bytes=${needsVideoCompression ? telegramVideoMaxBytes : "compatible"}`);
+      await transcodeForTelegram(inputPath, finalPath, needsVideoCompression ? telegramVideoMaxBytes : undefined);
+      await fs.promises.rm(inputPath, { force: true }).catch(() => undefined);
     }
 
     const result = await inspectDownloadedFile(finalPath, finalMediaType);
     if (result.byteSize > limit) {
       throw new Error(`Media exceeded byte limit after processing: ${result.byteSize} > ${limit}`);
+    }
+    if (finalMediaType === "video" && result.byteSize > telegramVideoMaxBytes) {
+      throw new Error(`Telegram video exceeded upload limit after processing: ${result.byteSize} > ${telegramVideoMaxBytes}`);
     }
 
     return {
@@ -506,6 +515,10 @@ function isGifMime(mimeType: string | undefined): boolean {
   return mimeType?.split(";")[0]?.trim().toLowerCase() === "image/gif";
 }
 
+function isTelegramMp4(filePath: string, mimeType: string | undefined): boolean {
+  return getExtension(filePath) === "mp4" || mimeType?.split(";")[0]?.trim().toLowerCase() === "video/mp4";
+}
+
 async function convertAnimatedWebpToMp4(inputPath: string, outputPath: string): Promise<void> {
   try {
     await runImageMagick([inputPath, "-coalesce", outputPath]);
@@ -515,17 +528,15 @@ async function convertAnimatedWebpToMp4(inputPath: string, outputPath: string): 
   }
 }
 
-async function transcodeForTelegram(inputPath: string, outputPath: string): Promise<void> {
+async function transcodeForTelegram(inputPath: string, outputPath: string, targetBytes?: number): Promise<void> {
   try {
-    await runFfmpeg([
+    const baseArgs = [
       "-hide_banner",
       "-y",
       "-i",
       inputPath,
       "-map",
       "0:v:0",
-      "-map",
-      "0:a?",
       "-sn",
       "-dn",
       "-vf",
@@ -534,12 +545,50 @@ async function transcodeForTelegram(inputPath: string, outputPath: string): Prom
       "libx264",
       "-preset",
       "veryfast",
-      "-crf",
-      "28",
       "-pix_fmt",
       "yuv420p",
       "-profile:v",
       "main",
+    ];
+
+    if (targetBytes) {
+      const duration = await readVideoDuration(inputPath);
+      const audioBitrate = 128_000;
+      const videoBitrate = Math.max(100_000, Math.floor((targetBytes * 8 * 0.98) / duration) - audioBitrate);
+      const passDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-ffmpeg-pass-"));
+      const passLog = path.join(passDir, "pass");
+      try {
+        await runFfmpeg([...baseArgs, "-b:v", String(videoBitrate), "-pass", "1", "-passlogfile", passLog, "-an", "-f", "mp4", os.devNull]);
+        await runFfmpeg([
+          ...baseArgs,
+          "-b:v",
+          String(videoBitrate),
+          "-pass",
+          "2",
+          "-passlogfile",
+          passLog,
+          "-map",
+          "0:a?",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "128k",
+          "-movflags",
+          "+faststart",
+          outputPath,
+        ]);
+      } finally {
+        await fs.promises.rm(passDir, { force: true, recursive: true }).catch(() => undefined);
+      }
+      return;
+    }
+
+    await runFfmpeg([
+      ...baseArgs,
+      "-crf",
+      "28",
+      "-map",
+      "0:a?",
       "-c:a",
       "aac",
       "-b:a",
@@ -552,6 +601,17 @@ async function transcodeForTelegram(inputPath: string, outputPath: string): Prom
     await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+async function readVideoDuration(filePath: string): Promise<number> {
+  const { stdout } = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
+    { timeout: env.PLATFORM_DOWNLOAD_TIMEOUT_MS },
+  );
+  const duration = Number(stdout.trim());
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error("ffprobe returned an invalid video duration");
+  return duration;
 }
 
 async function runImageMagick(args: string[]): Promise<void> {
