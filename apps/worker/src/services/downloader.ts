@@ -471,6 +471,16 @@ async function finalizeDownload(filePath: string, mediaType: "image" | "video", 
       alreadyProcessedVideo = true;
     }
 
+    if (finalMediaType === "image") {
+      const normalizedPhoto = await normalizePhotoForTelegram(finalPath, finalOriginalMimeType);
+      if (normalizedPhoto.filePath !== finalPath) {
+        const inputPath = finalPath;
+        finalPath = normalizedPhoto.filePath;
+        finalOriginalMimeType = normalizedPhoto.mimeType;
+        await fs.promises.rm(inputPath, { force: true }).catch(() => undefined);
+      }
+    }
+
     const needsVideoConversion = finalMediaType === "video" && !alreadyProcessedVideo && !isTelegramMp4(finalPath, finalOriginalMimeType);
     const needsVideoCompression = finalMediaType === "video" && (await fs.promises.stat(finalPath)).size > telegramVideoMaxBytes;
     if (finalMediaType === "video" && (needsVideoConversion || needsVideoCompression)) {
@@ -518,6 +528,50 @@ function isGifMime(mimeType: string | undefined): boolean {
 
 function isTelegramMp4(filePath: string, mimeType: string | undefined): boolean {
   return getExtension(filePath) === "mp4" || mimeType?.split(";")[0]?.trim().toLowerCase() === "video/mp4";
+}
+
+export function fitTelegramPhotoDimensions(width: number, height: number) {
+  let canvasWidth = width;
+  let canvasHeight = height;
+  if (width / height > 20) canvasHeight = Math.ceil(width / 20);
+  if (height / width > 20) canvasWidth = Math.ceil(height / 20);
+
+  const scale = Math.min(1, 9_999 / (canvasWidth + canvasHeight));
+  return {
+    contentWidth: Math.max(1, Math.floor(width * scale)),
+    contentHeight: Math.max(1, Math.floor(height * scale)),
+    canvasWidth: Math.max(1, Math.floor(canvasWidth * scale)),
+    canvasHeight: Math.max(1, Math.floor(canvasHeight * scale)),
+  };
+}
+
+async function normalizePhotoForTelegram(inputPath: string, mimeType: string | undefined): Promise<{ filePath: string; mimeType: string | undefined }> {
+  const { stdout } = await execFileAsync("magick", ["identify", "-format", "%w %h", `${inputPath}[0]`], { timeout: 10_000 });
+  const dimensions = stdout.trim().split(/\s+/);
+  const width = Number(dimensions[0]);
+  const height = Number(dimensions[1]);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) throw new Error("ImageMagick returned invalid image dimensions");
+
+  const fitted = fitTelegramPhotoDimensions(width, height);
+  if (fitted.contentWidth === width && fitted.contentHeight === height && fitted.canvasWidth === width && fitted.canvasHeight === height) {
+    return { filePath: inputPath, mimeType };
+  }
+
+  const outputMimeType = mimeType?.split(";")[0]?.trim().toLowerCase() === "image/jpeg" ? "image/jpeg" : "image/png";
+  const outputPath = path.join(os.tmpdir(), `archive-image-${crypto.randomUUID()}.${outputMimeType === "image/jpeg" ? "jpg" : "png"}`);
+  const args = [inputPath, "-resize", `${fitted.contentWidth}x${fitted.contentHeight}!`];
+  if (fitted.contentWidth !== fitted.canvasWidth || fitted.contentHeight !== fitted.canvasHeight) {
+    args.push("-background", "white", "-gravity", "center", "-extent", `${fitted.canvasWidth}x${fitted.canvasHeight}`);
+  }
+  args.push(outputPath);
+  console.log(`[image] resizing for Telegram input=${width}x${height} output=${fitted.canvasWidth}x${fitted.canvasHeight}`);
+  try {
+    await runImageMagick(args);
+    return { filePath: outputPath, mimeType: outputMimeType };
+  } catch (error) {
+    await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function convertAnimatedWebpToMp4(inputPath: string, outputPath: string): Promise<void> {
