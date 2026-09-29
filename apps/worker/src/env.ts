@@ -32,8 +32,8 @@ export const env = z
     NSFW_NIPPLES_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
     NSFWJS_SPOILER_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
     NSFW_MAX_FRAMES: z.coerce.number().int().min(1).max(20).default(8),
-    FALCONSAI_CLASSIFIER_URL: z.string().url().optional(),
-    FALCONSAI_SPOILER_THRESHOLD: z.coerce.number().min(0).max(1).default(0.55),
+    NSFW_ENSEMBLE_CLASSIFIER_URL: z.string().url().optional(),
+    NSFW_ENSEMBLE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
   })
   .parse(process.env);
 

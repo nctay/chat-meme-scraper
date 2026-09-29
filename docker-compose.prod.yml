@@ -23,16 +23,16 @@ services:
       - path: .env
         required: true
     environment:
-      FALCONSAI_CLASSIFIER_URL: http://falconsai:3333/classify
-      FALCONSAI_SPOILER_THRESHOLD: "0.55"
+      NSFW_ENSEMBLE_CLASSIFIER_URL: http://nsfw-ensemble:3333/classify
+      NSFW_ENSEMBLE_THRESHOLD: "0.8"
     depends_on:
       postgres:
         condition: service_healthy
-      falconsai:
+      nsfw-ensemble:
         condition: service_healthy
 
-  falconsai:
-    image: ${FALCONSAI_IMAGE:?FALCONSAI_IMAGE is required}
+  nsfw-ensemble:
+    image: ${NSFW_ENSEMBLE_IMAGE:?NSFW_ENSEMBLE_IMAGE is required}
     restart: unless-stopped
     cpus: 2
     mem_limit: 2500m

@@ -11,7 +11,8 @@ type Prediction = { className: string; probability: number };
 
 export type NsfwResult = {
   publicSpoiler: boolean;
-  falconsaiScore?: number;
+  owenScore?: number;
+  siglipScore?: number;
   nudeScore?: number;
   nipplesScore?: number;
   nsfwjsClassName?: string;
@@ -20,30 +21,32 @@ export type NsfwResult = {
 };
 
 export async function classifyNsfw(filePath: string, mediaType: "image" | "video", animated: boolean): Promise<NsfwResult> {
-  if (!env.FALCONSAI_CLASSIFIER_URL) return { publicSpoiler: false, status: "disabled" };
+  if (!env.NSFW_ENSEMBLE_CLASSIFIER_URL) return { publicSpoiler: false, status: "disabled" };
 
   const frameDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "archive-nsfw-"));
   try {
     const maxFrames = framesToCheck(mediaType, animated);
-    const frames = await extractFrames(filePath, path.join(frameDir, "falconsai"), maxFrames, false);
-    let highest = 0;
+    const frames = await extractFrames(filePath, path.join(frameDir, "ensemble"), maxFrames, false);
+    let highestOwen = 0;
+    let highestSiglip = 0;
     for (const frame of frames) {
-      const response = await fetch(env.FALCONSAI_CLASSIFIER_URL, {
+      const response = await fetch(env.NSFW_ENSEMBLE_CLASSIFIER_URL, {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },
         body: await fs.promises.readFile(frame),
         signal: AbortSignal.timeout(30_000),
       });
-      if (!response.ok) throw new Error(`Falconsai classifier returned ${response.status}`);
-      const body = (await response.json()) as { nsfw?: unknown };
-      if (typeof body.nsfw !== "number" || !Number.isFinite(body.nsfw) || body.nsfw < 0 || body.nsfw > 1) {
-        throw new Error("Falconsai classifier returned an invalid score");
+      if (!response.ok) throw new Error(`NSFW ensemble returned ${response.status}`);
+      const body = (await response.json()) as { owen?: unknown; siglip?: unknown };
+      if (!validScore(body.owen) || !validScore(body.siglip)) {
+        throw new Error("NSFW ensemble returned invalid scores");
       }
-      highest = Math.max(highest, body.nsfw);
+      highestOwen = Math.max(highestOwen, body.owen);
+      highestSiglip = Math.max(highestSiglip, body.siglip);
     }
-    return { publicSpoiler: shouldSpoilerFalconsai(highest), falconsaiScore: highest, status: "ok" };
+    return { publicSpoiler: shouldSpoilerEnsemble(highestOwen, highestSiglip), owenScore: highestOwen, siglipScore: highestSiglip, status: "ok" };
   } catch (error) {
-    console.error(`[nsfw] Falconsai classification failed; enabling public spoiler error=${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[nsfw] ensemble classification failed; enabling public spoiler error=${error instanceof Error ? error.message : String(error)}`);
     return { publicSpoiler: true, status: "error" };
   } finally {
     await fs.promises.rm(frameDir, { force: true, recursive: true }).catch(() => undefined);
@@ -54,8 +57,12 @@ export function framesToCheck(mediaType: "image" | "video", animated: boolean): 
   return mediaType === "video" || animated ? env.NSFW_MAX_FRAMES : 1;
 }
 
-export function shouldSpoilerFalconsai(score: number): boolean {
-  return score >= env.FALCONSAI_SPOILER_THRESHOLD;
+export function shouldSpoilerEnsemble(owenScore: number, siglipScore: number): boolean {
+  return owenScore >= env.NSFW_ENSEMBLE_THRESHOLD || siglipScore >= env.NSFW_ENSEMBLE_THRESHOLD;
+}
+
+function validScore(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 // Retained for comparison; production calls classifyNsfw only.
